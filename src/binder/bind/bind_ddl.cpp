@@ -368,6 +368,9 @@ std::unique_ptr<BoundStatement> Binder::bindCreateIndex(const Statement& stateme
     validateNodeTableType(tableEntry);
     validateColumnExistence(tableEntry, info.propertyName);
     auto nodeTableEntry = tableEntry->ptrCast<NodeTableCatalogEntry>();
+    if (!nodeTableEntry->getStorage().empty()) {
+        throw BinderException("CREATE INDEX is only supported on native node tables.");
+    }
     if (!StringUtils::caseInsensitiveEquals(nodeTableEntry->getPrimaryKeyName(),
             info.propertyName)) {
         throw BinderException("HASH indexes are currently supported only on node primary keys.");

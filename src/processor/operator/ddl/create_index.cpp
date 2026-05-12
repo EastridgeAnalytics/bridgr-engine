@@ -21,12 +21,38 @@ void CreateIndex::executeInternal(ExecutionContext* context) {
     auto transaction = transaction::Transaction::Get(*clientContext);
     auto memoryManager = storage::MemoryManager::Get(*clientContext);
     auto storageManager = storage::StorageManager::Get(*clientContext);
-    const auto indexExists = catalog->containsIndex(transaction, info.tableID, info.indexName) ||
-                             catalog->containsIndex(transaction, info.tableID, info.propertyID);
+    const auto indexNameExists = catalog->containsIndex(transaction, info.tableID, info.indexName);
+    const auto indexedPropertyExists =
+        catalog->containsIndex(transaction, info.tableID, info.propertyID);
     auto* table = storageManager->getTable(info.tableID)->ptrCast<storage::NodeTable>();
-    const auto storageIndexExists =
-        table->getIndex(info.indexName).has_value() || table->tryGetPKIndex() != nullptr;
-    if (indexExists || storageIndexExists) {
+    const auto* pkIndex = table->tryGetPKIndex();
+    const auto storageIndexNameExists = table->getIndex(info.indexName).has_value();
+    const auto storagePKIndexExists = pkIndex != nullptr;
+    const auto canRegisterExistingPKIndex =
+        storagePKIndexExists && !indexedPropertyExists && !indexNameExists;
+    const auto canCreatePhysicalIndex = !storagePKIndexExists && !indexedPropertyExists &&
+                                        !indexNameExists && !storageIndexNameExists;
+    if (canRegisterExistingPKIndex || canCreatePhysicalIndex) {
+        auto indexType = storage::PrimaryKeyIndex::getIndexType();
+        if (canCreatePhysicalIndex) {
+            storage::IndexInfo indexInfo{info.indexName, indexType.typeName, info.tableID,
+                {info.columnID}, {info.keyDataType},
+                indexType.constraintType == storage::IndexConstraintType::PRIMARY,
+                indexType.definitionType == storage::IndexDefinitionType::BUILTIN};
+            auto index = storage::PrimaryKeyIndex::createNewIndex(std::move(indexInfo),
+                storageManager->isInMemory(), *memoryManager,
+                *storageManager->getDataFH()->getPageManager(), &storageManager->getShadowFile());
+            table->buildIndexAndAdd(clientContext, std::move(index));
+        }
+        catalog->createIndex(transaction,
+            std::make_unique<IndexCatalogEntry>(indexType.typeName, info.tableID, info.indexName,
+                std::vector<property_id_t>{info.propertyID},
+                std::make_unique<BuiltinIndexAuxInfo>()));
+        appendMessage(std::format("Index {} has been created.", info.indexName), memoryManager);
+        return;
+    }
+    if (indexNameExists || indexedPropertyExists || storageIndexNameExists ||
+        storagePKIndexExists) {
         switch (info.onConflict) {
         case ConflictAction::ON_CONFLICT_DO_NOTHING: {
             appendMessage(std::format("Index {} already exists.", info.indexName), memoryManager);
@@ -39,18 +65,6 @@ void CreateIndex::executeInternal(ExecutionContext* context) {
             UNREACHABLE_CODE;
         }
     }
-    auto indexType = storage::PrimaryKeyIndex::getIndexType();
-    storage::IndexInfo indexInfo{info.indexName, indexType.typeName, info.tableID, {info.columnID},
-        {info.keyDataType}, indexType.constraintType == storage::IndexConstraintType::PRIMARY,
-        indexType.definitionType == storage::IndexDefinitionType::BUILTIN};
-    auto index = storage::PrimaryKeyIndex::createNewIndex(std::move(indexInfo),
-        storageManager->isInMemory(), *memoryManager,
-        *storageManager->getDataFH()->getPageManager(), &storageManager->getShadowFile());
-    table->buildIndexAndAdd(clientContext, std::move(index));
-    catalog->createIndex(transaction,
-        std::make_unique<IndexCatalogEntry>(info.indexType, info.tableID, info.indexName,
-            std::vector<property_id_t>{info.propertyID}, std::make_unique<BuiltinIndexAuxInfo>()));
-    appendMessage(std::format("Index {} has been created.", info.indexName), memoryManager);
 }
 
 } // namespace processor

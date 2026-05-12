@@ -1,6 +1,22 @@
 -DATASET CSV empty
 --
 
+-CASE CreateHashIndexWithDefaultPKIndex
+-STATEMENT CREATE NODE TABLE idx_default_person (ID INT64, name STRING, PRIMARY KEY(ID));
+---- 1
+Table idx_default_person has been created.
+-STATEMENT CREATE (:idx_default_person {ID: 1, name: 'Alice'});
+---- ok
+-STATEMENT CREATE INDEX idx_default_person_pk IF NOT EXISTS FOR (p:idx_default_person) ON (p.ID);
+---- 1
+Index idx_default_person_pk has been created.
+-STATEMENT CALL SHOW_INDEXES() RETURN table_name, index_name, property_names;
+---- 1
+idx_default_person|idx_default_person_pk|[ID]
+-STATEMENT CREATE INDEX idx_default_person_pk IF NOT EXISTS FOR (p:idx_default_person) ON (p.ID);
+---- 1
+Index idx_default_person_pk already exists.
+
 -CASE CreateHashIndex
 -STATEMENT CALL enable_default_hash_index=false;
 ---- ok
