@@ -5,6 +5,8 @@ from bridgr.argus import BridgrStore
 from bridgr.migrate import migrate_case
 from bridgr.algorithms import GraphAlgorithms
 from bridgr.vector import VectorIndex
+from bridgr.audit import AuditedDatabase, AuditLog
+from bridgr.export import DataExporter
 from bridgr.exceptions import (
     BridgrError,
     NodeNotFoundError,
@@ -20,6 +22,9 @@ __all__ = [
     "BridgrStore",
     "GraphAlgorithms",
     "VectorIndex",
+    "AuditedDatabase",
+    "AuditLog",
+    "DataExporter",
     "migrate_case",
     "open",
     "BridgrError",
