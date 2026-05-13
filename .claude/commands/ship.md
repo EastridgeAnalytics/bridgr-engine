@@ -45,7 +45,7 @@ Compose a concise bullet-point summary of this session's changes. Format:
 _Docs updated:_ [list of doc files touched, or "none"]
 ```
 
-Send this to the `#argus-commit-updates` Slack channel using `mcp__plugin_slack_slack__slack_send_message`.
+Send this to the `#bridgr` Slack channel using `mcp__plugin_slack_slack__slack_send_message`.
 
 ---
 
