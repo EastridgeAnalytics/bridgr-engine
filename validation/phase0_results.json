@@ -1,0 +1,191 @@
+{
+  "schema:create_node_tables": {
+    "elapsed_ms": 32.82,
+    "status": "PASS"
+  },
+  "schema:create_edge_tables": {
+    "elapsed_ms": 8.74,
+    "status": "PASS"
+  },
+  "load:entities": {
+    "elapsed_ms": 23.17,
+    "status": "PASS"
+  },
+  "load:facts": {
+    "elapsed_ms": 38.01,
+    "status": "PASS"
+  },
+  "load:sources": {
+    "elapsed_ms": 27.83,
+    "status": "PASS"
+  },
+  "load:issues": {
+    "elapsed_ms": 4.76,
+    "status": "PASS"
+  },
+  "load:edges_involves": {
+    "elapsed_ms": 127.97,
+    "status": "PASS"
+  },
+  "load:edges_sourced_from": {
+    "elapsed_ms": 104.33,
+    "status": "PASS"
+  },
+  "load:edges_connected_to": {
+    "elapsed_ms": 20.19,
+    "status": "PASS"
+  },
+  "load:edges_issues": {
+    "elapsed_ms": 25.53,
+    "status": "PASS"
+  },
+  "query:single_node_lookup": {
+    "elapsed_ms": 1.62,
+    "status": "PASS"
+  },
+  "query:reverse_index_facts_for_entity": {
+    "elapsed_ms": 2.94,
+    "status": "PASS"
+  },
+  "query:2hop_connections": {
+    "elapsed_ms": 7.81,
+    "status": "PASS"
+  },
+  "query:3hop_connections": {
+    "elapsed_ms": 3.02,
+    "status": "PASS"
+  },
+  "query:multi_hop_through_facts": {
+    "elapsed_ms": 6.46,
+    "status": "PASS"
+  },
+  "query:shortest_path": {
+    "elapsed_ms": 21.44,
+    "status": "PASS"
+  },
+  "query:entity_co_occurrence": {
+    "elapsed_ms": 7.62,
+    "status": "PASS"
+  },
+  "query:facts_by_source": {
+    "elapsed_ms": 1.73,
+    "status": "PASS"
+  },
+  "query:issue_hierarchy": {
+    "elapsed_ms": 2.36,
+    "status": "PASS"
+  },
+  "query:contradiction_detection": {
+    "elapsed_ms": 6.68,
+    "status": "PASS"
+  },
+  "query:canvas_data": {
+    "elapsed_ms": 3.16,
+    "status": "PASS"
+  },
+  "query:arrow_output": {
+    "elapsed_ms": 113.48,
+    "status": "PASS"
+  },
+  "query:pandas_output": {
+    "elapsed_ms": 1708.56,
+    "status": "PASS"
+  },
+  "batch:insert_500_nodes": {
+    "elapsed_ms": 197.29,
+    "status": "PASS"
+  },
+  "batch:insert_2000_edges": {
+    "elapsed_ms": 1852.97,
+    "status": "PASS"
+  },
+  "batch:total_500n_2000e": {
+    "elapsed_ms": 2050.32,
+    "status": "WARN"
+  },
+  "embed:open_close_db": {
+    "elapsed_ms": 119.92,
+    "status": "PASS"
+  },
+  "embed:memory_mode": {
+    "elapsed_ms": 28.12,
+    "status": "PASS"
+  },
+  "embed:evaluation": {
+    "status": "PASS",
+    "details": {
+      "import_name": "real_ladybug",
+      "version": "0.15.3",
+      "in_process": true,
+      "no_subprocess": true,
+      "no_daemon": true,
+      "binding_type": "pybind11 (inherited from Kuzu)",
+      "platforms": "Windows x64, macOS arm64/x64, Linux x64/arm64",
+      "python_versions": "3.10, 3.11, 3.12, 3.13, 3.14"
+    }
+  },
+  "capabilities": {
+    "query_language": "Cypher (not SQL)",
+    "variable_length_paths": true,
+    "shortest_path": true,
+    "weighted_shortest_path": true,
+    "vector_index": "HNSW (cosine, l2, dotproduct)",
+    "full_text_search": "BM25 via FTS extension",
+    "graph_algorithms": [
+      "K-Core",
+      "Louvain",
+      "PageRank",
+      "SCC",
+      "WCC"
+    ],
+    "output_formats": [
+      "Arrow",
+      "Pandas",
+      "Polars",
+      "dict",
+      "list"
+    ],
+    "data_types": [
+      "STRING",
+      "INT8/16/32/64/128",
+      "UINT8/16/32/64",
+      "FLOAT",
+      "DOUBLE",
+      "DECIMAL",
+      "BOOLEAN",
+      "DATE",
+      "TIMESTAMP",
+      "INTERVAL",
+      "LIST",
+      "ARRAY",
+      "MAP",
+      "STRUCT",
+      "UNION",
+      "JSON",
+      "SERIAL",
+      "UUID",
+      "BLOB"
+    ],
+    "embedding_modes": [
+      "on-disk (.lbug file)",
+      "in-memory (:memory:)"
+    ],
+    "acid_transactions": true,
+    "concurrency": "multi-reader, single-writer",
+    "license": "MIT"
+  },
+  "gaps_vs_strategy": {
+    "sql_surface": "LadybugDB uses Cypher, not SQL. DataFusion integration required for SQL-first strategy.",
+    "missing_gds_algorithms": [
+      "Shortest Path (built-in via Cypher, not algo extension)",
+      "Degree Centrality (not built-in, trivial to compute via Cypher)",
+      "Betweenness Centrality (not built-in)",
+      "Node Similarity (not built-in)",
+      "Label Propagation (not built-in)",
+      "BFS/DFS (built-in via Cypher path patterns)"
+    ],
+    "entity_resolution": "Not built-in. ER_Agentic integration needed.",
+    "mcp_server": "Not built-in. Must be built as a wrapper.",
+    "audit_trail": "Not built-in. Must be built as a wrapper."
+  }
+}

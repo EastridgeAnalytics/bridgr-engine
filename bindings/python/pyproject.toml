@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bridgr"
+version = "0.1.0"
+description = "AI-native embedded graph database for enterprise"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    {name = "Eastridge Analytics", email = "eastridge.analytics.001@gmail.com"},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Database :: Database Engines/Servers",
+]
+dependencies = [
+    "real_ladybug>=0.15.0",
+    "pyarrow>=14.0",
+]
+
+[project.optional-dependencies]
+pandas = ["pandas>=2.0"]
+
+[project.urls]
+Homepage = "https://github.com/EastridgeAnalytics/bridgr-engine"
+Repository = "https://github.com/EastridgeAnalytics/bridgr-engine"
+
+[tool.setuptools.packages.find]
+where = ["src"]
