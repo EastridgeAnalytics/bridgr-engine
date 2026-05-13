@@ -54,7 +54,7 @@ cmake --build build/release --config Release
 - `audit.py` — AuditedDatabase (append-only mutation log)
 - `export.py` — DataExporter (Parquet/CSV import/export)
 - `migrate.py` — Filesystem → .lbug migration tool
-- `mcp_server.py` — MCP server (12 tools for AI agent access)
+- `mcp_server.py` — MCP server (24 tools for AI agent access)
 - `exceptions.py` — Error hierarchy
 
 **C++ engine:** LadybugDB fork with CSR storage, Cypher, factorized joins, WCOJ, built-in extensions (algo, vector, fts, json).
@@ -74,9 +74,13 @@ cmake --build build/release --config Release
 python -m bridgr.mcp_server --db /path/to/database.lbug
 ```
 
-12 tools shipped: `query`, `read_node`, `write_node`, `delete_node`, `create_edge`, `search`, `traverse_graph`, `list_node_types`, `get_edges`, `create_node_table`, `create_edge_table`, `list_schema`.
+24 tools shipped (v0.1 + v0.2 complete):
 
-MCP v0.2 engine tools remaining: schema DDL (2 more), `run_algorithm`, `bulk_import`, vector tools (3), `get_audit_log`, `export_data`. Schema DDL shipped: `create_node_table`, `create_edge_table`, `list_schema`. See strategy repo `technical-specs/dev-team-briefing.md` for specs.
+**v0.1 (core CRUD):** `query`, `read_node`, `write_node`, `delete_node`, `create_edge`, `search`, `traverse_graph`, `list_node_types`, `get_edges`, `create_node_table`, `create_edge_table`, `list_schema`.
+
+**v0.2 (engine API):** `begin_transaction`, `commit_transaction`, `rollback_transaction`, `drop_table`, `alter_table`, `run_algorithm`, `bulk_import`, `create_vector_index`, `vector_search`, `hybrid_search`, `get_audit_log`, `export_data`.
+
+Structured error codes: `SCHEMA_CONFLICT`, `NOT_FOUND`, `DUPLICATE`, `TRANSACTION_ERROR`, `VALIDATION_ERROR`, `CONFIRMATION_REQUIRED`.
 
 ## Key Rules
 
