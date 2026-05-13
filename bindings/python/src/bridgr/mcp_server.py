@@ -1,7 +1,8 @@
 """Bridgr MCP Server — AI agent interface to a Bridgr graph database.
 
 Exposes tools: query, read_node, write_node, delete_node, search,
-traverse_graph, list_node_types. Runs as a stdio MCP server.
+traverse_graph, list_node_types, get_edges, create_node_table,
+create_edge_table, list_schema. Runs as a stdio MCP server.
 
 Usage:
     # As a module (for Claude Code MCP config):
@@ -203,6 +204,73 @@ TOOLS = [
             "required": ["node_id", "label"],
         },
     ),
+    Tool(
+        name="create_node_table",
+        description=(
+            "Create a new node table (node type) in the database. "
+            "Exactly one property type must include 'PRIMARY KEY'. "
+            "Example properties: {\"id\": \"STRING PRIMARY KEY\", \"name\": \"STRING\", \"age\": \"INT64\"}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string",
+                    "description": "Node table label (e.g., 'Person', 'Organization').",
+                },
+                "properties": {
+                    "type": "object",
+                    "description": (
+                        "Mapping of property name to Kùzu type string. "
+                        "One property must include 'PRIMARY KEY' in its type. "
+                        "Supported types: STRING, INT64, DOUBLE, BOOL, DATE, TIMESTAMP, STRING[]."
+                    ),
+                },
+            },
+            "required": ["label", "properties"],
+        },
+    ),
+    Tool(
+        name="create_edge_table",
+        description=(
+            "Create a new edge table (relationship type) connecting two node tables. "
+            "Both endpoint node tables must already exist."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string",
+                    "description": "Edge table label (e.g., 'WORKS_AT', 'KNOWS').",
+                },
+                "from_label": {
+                    "type": "string",
+                    "description": "Label of the source node table.",
+                },
+                "to_label": {
+                    "type": "string",
+                    "description": "Label of the target node table.",
+                },
+                "properties": {
+                    "type": "object",
+                    "description": "Optional edge properties (name → Kùzu type). Can be empty.",
+                    "default": {},
+                },
+            },
+            "required": ["label", "from_label", "to_label"],
+        },
+    ),
+    Tool(
+        name="list_schema",
+        description=(
+            "List the full database schema: all node tables and edge tables "
+            "with their columns, types, primary keys, row counts, and connections."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
 ]
 
 
@@ -328,6 +396,82 @@ def _dispatch(db: Database, tool_name: str, args: dict) -> Any:
     elif tool_name == "get_edges":
         edges = db.get_edges(args["node_id"], label=args.get("label"))
         return {"edges": edges, "count": len(edges)}
+
+    elif tool_name == "create_node_table":
+        label = args["label"]
+        properties = args["properties"]
+        try:
+            db.create_node_table(label, properties)
+        except Exception as e:
+            return {"success": False, "error": str(e), "code": "SCHEMA_CONFLICT"}
+        return {"success": True, "label": label, "properties": properties}
+
+    elif tool_name == "create_edge_table":
+        label = args["label"]
+        from_label = args["from_label"]
+        to_label = args["to_label"]
+        properties = args.get("properties") or {}
+        try:
+            db.create_edge_table(label, from_label, to_label, properties or None)
+        except Exception as e:
+            return {"success": False, "error": str(e), "code": "SCHEMA_CONFLICT"}
+        return {
+            "success": True,
+            "label": label,
+            "from_label": from_label,
+            "to_label": to_label,
+        }
+
+    elif tool_name == "list_schema":
+        result = db.execute("CALL SHOW_TABLES() RETURN name, type")
+        tables = []
+        while result.has_next():
+            row = result.get_next()
+            tables.append({"name": row[0], "type": row[1]})
+
+        schema: dict[str, list] = {"node_tables": [], "edge_tables": []}
+
+        for table in tables:
+            label = table["name"]
+            table_type = table["type"]
+
+            columns = []
+            try:
+                col_result = db.execute(f"CALL table_info('{label}') RETURN *")
+                while col_result.has_next():
+                    col_row = col_result.get_next()
+                    col_names = col_result.get_column_names()
+                    columns.append(dict(zip(col_names, col_row)))
+            except RuntimeError:
+                pass
+
+            if table_type == "NODE":
+                count_result = db.execute(f"MATCH (n:{label}) RETURN count(n) AS cnt")
+                count = count_result.get_next()[0]
+                schema["node_tables"].append({
+                    "label": label,
+                    "columns": columns,
+                    "count": count,
+                })
+            elif table_type == "REL":
+                connections = []
+                try:
+                    conn_result = db.execute(
+                        f"CALL show_connection('{label}') RETURN *"
+                    )
+                    while conn_result.has_next():
+                        conn_row = conn_result.get_next()
+                        conn_names = conn_result.get_column_names()
+                        connections.append(dict(zip(conn_names, conn_row)))
+                except RuntimeError:
+                    pass
+                schema["edge_tables"].append({
+                    "label": label,
+                    "columns": columns,
+                    "connections": connections,
+                })
+
+        return schema
 
     else:
         return {"error": f"Unknown tool: {tool_name}"}

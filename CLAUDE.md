@@ -92,4 +92,5 @@ MCP v0.2 engine tools planned: schema DDL (5), `run_algorithm`, `bulk_import`, v
 | Bridgr_20260512 (strategy) | `C:\Users\eastr\Projects\Bridgr_20260512` | Architecture docs, decisions, roadmap |
 | bridgr-agent (private) | `C:\Users\eastr\Projects\bridgr-agent` | Proprietary AI agent layer |
 | Argus | `C:\Users\eastr\Projects\Argus_CaseMap_Claw` | First customer, uses BridgrStore |
+| bridgr-server (private) | `C:\Users\eastr\Projects\bridgr-server` | Rust server wrapper (Tier 3): gRPC, Arrow Flight, REST, MCP-over-HTTP, auth, ethical walls. C FFI to engine via `lbug.h` |
 | ER_Agentic | `C:\Users\eastr\Projects\ER_Agentic` | Entity resolution module |
