@@ -61,7 +61,8 @@ cmake --build build/release --config Release
 
 ## What Does NOT Live Here
 
-- Agent runtime, credit metering, API key management → `bridgr-agent` (private repo)
+- Product assembly, CLI, unified session, configuration → `bridgr` (private, product repo)
+- Agent runtime, credit metering, API key management → `bridgr-agent` (private, intelligence library)
 - Schema inference, import orchestration → `bridgr-agent`
 - Vertical prompts (legal, fraud, retail) → `bridgr-agent`
 - Memory persistence (save_memory, recall_memories) → `bridgr-agent`
@@ -93,8 +94,9 @@ Structured error codes: `SCHEMA_CONFLICT`, `NOT_FOUND`, `DUPLICATE`, `TRANSACTIO
 
 | Repo | Path | Purpose |
 |------|------|---------|
+| bridgr (private) | `C:\Users\eastr\Projects\bridgr` | **The product.** Assembles engine + agent into unified SDK, CLI, and API. |
 | Bridgr_20260512 (strategy) | `C:\Users\eastr\Projects\Bridgr_20260512` | Architecture docs, decisions, roadmap |
-| bridgr-agent (private) | `C:\Users\eastr\Projects\bridgr-agent` | Proprietary AI agent layer |
-| Argus | `C:\Users\eastr\Projects\Argus_CaseMap_Claw` | First customer, uses BridgrStore |
-| bridgr-server (private) | `C:\Users\eastr\Projects\bridgr-server` | Rust server wrapper (Tier 3): gRPC, Arrow Flight, REST, MCP-over-HTTP, auth, ethical walls. C FFI to engine via `lbug.h` |
+| bridgr-agent (private) | `C:\Users\eastr\Projects\bridgr-agent` | Intelligence library (schema inference, prompts, memory) |
+| Argus | `C:\Users\eastr\Projects\Argus_CaseMap_Claw` | First customer of the Bridgr product |
+| bridgr-server (private) | `C:\Users\eastr\Projects\bridgr-server` | Rust server wrapper (Tier 3): gRPC, Arrow Flight, REST, MCP-over-HTTP, auth, ethical walls |
 | ER_Agentic | `C:\Users\eastr\Projects\ER_Agentic` | Entity resolution module |

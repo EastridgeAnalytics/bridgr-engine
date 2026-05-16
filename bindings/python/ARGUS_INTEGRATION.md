@@ -1,5 +1,7 @@
 # Argus Integration Guide — Swapping CaseGraph for BridgrStore
 
+> **Note (2026-05-15):** This guide shows the direct engine integration path (`from bridgr.argus import BridgrStore`). Once the `bridgr` product repo ships, the recommended path is for Argus to import the assembled product (`from bridgr import Bridgr`) which manages the engine lifecycle, agent connection, and MCP communication internally. This guide remains valid as a reference for how BridgrStore maps to CaseGraph, but the integration surface will simplify.
+
 This guide documents the exact code changes needed in the Argus repo to replace the filesystem-based CaseGraph with BridgrStore (backed by LadybugDB). Covers stories A-6 through A-11.
 
 ## Prerequisites
