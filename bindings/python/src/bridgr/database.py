@@ -25,6 +25,78 @@ _CYPHER_TYPE_MAP = {
 }
 
 
+def _arrow_type_to_cypher(arrow_type) -> str:
+    """Map an Arrow data type to a Cypher type string."""
+    import pyarrow as pa
+
+    if pa.types.is_string(arrow_type) or pa.types.is_large_string(arrow_type):
+        return "STRING"
+    elif pa.types.is_int8(arrow_type) or pa.types.is_int16(arrow_type) or pa.types.is_int32(arrow_type):
+        return "INT32"
+    elif pa.types.is_int64(arrow_type):
+        return "INT64"
+    elif pa.types.is_float16(arrow_type) or pa.types.is_float32(arrow_type):
+        return "FLOAT"
+    elif pa.types.is_float64(arrow_type):
+        return "DOUBLE"
+    elif pa.types.is_boolean(arrow_type):
+        return "BOOLEAN"
+    elif pa.types.is_date(arrow_type):
+        return "DATE"
+    elif pa.types.is_timestamp(arrow_type):
+        return "TIMESTAMP"
+    elif pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type):
+        return "STRING[]"
+    else:
+        return "STRING"
+
+
+def _arrow_schema_to_cypher(schema, primary_key: str | None) -> dict[str, str]:
+    """Convert an Arrow schema to a Cypher property dict with PRIMARY KEY annotation."""
+    props: dict[str, str] = {}
+    for field in schema:
+        cypher_type = _arrow_type_to_cypher(field.type)
+        if field.name == primary_key:
+            props[field.name] = f"{cypher_type} PRIMARY KEY"
+        else:
+            props[field.name] = cypher_type
+    return props
+
+
+def _find_primary_key(schema, *, label_hint: str | None = None) -> str | None:
+    """Heuristic: find the best PK column from an Arrow schema."""
+    import pyarrow as pa
+    import re
+
+    label_lower = label_hint.lower() if label_hint else ""
+    # Split CamelCase into words for substring matching (PurchaseOrder → purchase, order)
+    label_words = [w.lower() for w in re.findall(r"[A-Z]?[a-z]+", label_hint or "")]
+
+    candidates = []
+    for field in schema:
+        name_lower = field.name.lower()
+        prefix = name_lower.replace("_id", "") if name_lower.endswith("_id") else ""
+        # Prefer <label>_id or <label_word>_id (e.g., order_id for "PurchaseOrder")
+        if label_hint and name_lower.endswith("_id") and (
+            prefix == label_lower or prefix in label_words
+        ):
+            candidates.append((-1, field.name))
+        elif name_lower == "id":
+            candidates.append((0, field.name))
+        elif name_lower.endswith("_id"):
+            candidates.append((1, field.name))
+        elif "key" in name_lower or "pk" in name_lower:
+            candidates.append((2, field.name))
+    if candidates:
+        candidates.sort()
+        return candidates[0][1]
+    # Fallback: first string or int column
+    for field in schema:
+        if pa.types.is_string(field.type) or pa.types.is_integer(field.type):
+            return field.name
+    return None
+
+
 class Database:
     """An embedded Bridgr graph database.
 
@@ -54,6 +126,147 @@ class Database:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+    # ------------------------------------------------------------------
+    # Factory class methods
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_delta_lake(
+        cls,
+        table_path: str,
+        *,
+        db_path: str = ":memory:",
+        node_label: str = "Entity",
+        primary_key: str | None = None,
+    ) -> "Database":
+        """Create a Database with nodes imported from a Delta Lake table.
+
+        Reads a Delta table via the `deltalake` package (Apache 2.0, built on
+        delta-rs), maps Arrow types to Cypher types, creates a node table, and
+        bulk-imports via COPY FROM Parquet.
+
+        Args:
+            table_path: Path to a Delta table (local, s3://, gs://, az://).
+            db_path: LadybugDB database path. ":memory:" for in-memory.
+            node_label: Label for the created node table.
+            primary_key: Column to use as primary key. If None, uses the first
+                column. If no suitable column exists, creates a synthetic _row_id.
+
+        Returns:
+            A Database instance with the imported nodes.
+
+        Requires:
+            pip install bridgr[deltalake]
+        """
+        try:
+            import deltalake
+        except ImportError as e:
+            raise ImportError(
+                "deltalake package required. Install with: pip install bridgr[deltalake]"
+            ) from e
+
+        import tempfile
+        import pyarrow.parquet as pq
+
+        dt = deltalake.DeltaTable(table_path)
+        arrow_table = dt.to_pyarrow_table()
+
+        if arrow_table.num_rows == 0:
+            db = cls(db_path)
+            pk_col = primary_key or _find_primary_key(arrow_table.schema)
+            if pk_col is None and len(arrow_table.schema) > 0:
+                pk_col = arrow_table.schema[0].name
+            props = _arrow_schema_to_cypher(arrow_table.schema, pk_col)
+            db.create_node_table(node_label, props)
+            return db
+
+        # Determine primary key
+        pk_col = primary_key or _find_primary_key(arrow_table.schema)
+        if pk_col and pk_col not in arrow_table.column_names:
+            raise ValueError(f"Primary key column '{pk_col}' not found in Delta table.")
+
+        # If no PK found, add synthetic row id
+        if pk_col is None:
+            import pyarrow as pa
+            pk_col = "_row_id"
+            ids = pa.array([str(i) for i in range(arrow_table.num_rows)])
+            arrow_table = arrow_table.append_column("_row_id", ids)
+
+        # Map schema
+        props = _arrow_schema_to_cypher(arrow_table.schema, pk_col)
+
+        # Write to temp Parquet, create table, COPY FROM
+        db = cls(db_path)
+        db.create_node_table(node_label, props)
+
+        with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as f:
+            tmp_path = f.name
+        try:
+            pq.write_table(arrow_table, tmp_path)
+            from bridgr.export import _cypher_path
+            cp = _cypher_path(tmp_path)
+            db.execute(f'COPY {node_label} FROM "{cp}"')
+        finally:
+            import os
+            os.unlink(tmp_path)
+
+        return db
+
+    def import_delta_table(
+        self,
+        table_path: str,
+        node_label: str,
+        *,
+        primary_key: str | None = None,
+    ) -> int:
+        """Import a Delta Lake table as nodes into this database.
+
+        Unlike from_delta_lake() which creates a new database, this adds nodes
+        to an existing database. Used for multi-table import scenarios.
+
+        Returns the number of rows imported.
+        """
+        try:
+            import deltalake
+        except ImportError as e:
+            raise ImportError(
+                "deltalake package required. Install with: pip install bridgr[deltalake]"
+            ) from e
+
+        import os
+        import tempfile
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        dt = deltalake.DeltaTable(table_path)
+        arrow_table = dt.to_pyarrow_table()
+
+        pk_col = primary_key or _find_primary_key(arrow_table.schema, label_hint=node_label)
+        if pk_col and pk_col not in arrow_table.column_names:
+            raise ValueError(f"Primary key column '{pk_col}' not found in Delta table.")
+        if pk_col is None:
+            pk_col = "_row_id"
+            ids = pa.array([str(i) for i in range(arrow_table.num_rows)])
+            arrow_table = arrow_table.append_column("_row_id", ids)
+
+        props = _arrow_schema_to_cypher(arrow_table.schema, pk_col)
+        self.create_node_table(node_label, props)
+
+        if arrow_table.num_rows == 0:
+            return 0
+
+        with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as f:
+            tmp_path = f.name
+        try:
+            pq.write_table(arrow_table, tmp_path)
+            from bridgr.export import _cypher_path
+            cp = _cypher_path(tmp_path)
+            self.execute(f'COPY {node_label} FROM "{cp}"')
+        finally:
+            os.unlink(tmp_path)
+
+        return arrow_table.num_rows
 
     # ------------------------------------------------------------------
     # Raw query execution

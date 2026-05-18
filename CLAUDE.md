@@ -100,3 +100,5 @@ Structured error codes: `SCHEMA_CONFLICT`, `NOT_FOUND`, `DUPLICATE`, `TRANSACTIO
 | Argus | `C:\Users\eastr\Projects\Argus_CaseMap_Claw` | First customer of the Bridgr product |
 | bridgr-server (private) | `C:\Users\eastr\Projects\bridgr-server` | Rust server wrapper (Tier 3): gRPC, Arrow Flight, REST, MCP-over-HTTP, auth, ethical walls |
 | ER_Agentic | `C:\Users\eastr\Projects\ER_Agentic` | Entity resolution module |
+
+Do not mention timelines and delivery dates in the conversation. Prioritization is okay, but not amounts of time to complete items.
