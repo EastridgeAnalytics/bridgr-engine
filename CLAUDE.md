@@ -49,7 +49,8 @@ cmake --build build/release --config Release
 **Python package (`bindings/python/src/bridgr/`):**
 - `database.py` — Core Database class (Cypher CRUD, transactions, Arrow/Pandas export)
 - `argus.py` — BridgrStore (drop-in CaseGraph replacement for Argus)
-- `algorithms.py` — GraphAlgorithms (WCC, PageRank, Louvain, SCC, K-Core + Cypher-based)
+- `algorithms.py` — GraphAlgorithms (WCC, PageRank, Louvain, Leiden, SCC, K-Core + Cypher-based)
+- `_leiden.py` — Pure Python Leiden community detection (guarantees connected communities)
 - `vector.py` — VectorIndex (HNSW: cosine, L2, dotproduct, hybrid search)
 - `audit.py` — AuditedDatabase (append-only mutation log)
 - `export.py` — DataExporter (Parquet/CSV import/export)
