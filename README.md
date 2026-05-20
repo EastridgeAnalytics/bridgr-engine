@@ -55,6 +55,12 @@ To learn more about installation, see our [Installation](https://docs.ladybugdb.
 
 Refer to our [Getting Started](https://docs.ladybugdb.com/get-started/) page for your first example.
 
+## Performance
+
+Standardized benchmark on the [Rao graph-benchmark](https://github.com/EastridgeAnalytics/graph-benchmark) (100K nodes, 2.4M edges, 9 queries). Bridgr results appended to existing Neo4j/LadybugDB/lance-graph table.
+
+Highlights: Q8 (2-hop path count) in **13.7ms** vs Neo4j 2,831ms (207x faster). Q1 (top followers) in **165ms** vs Neo4j 1,552ms (9.4x faster). Full results and reproduction instructions: [EastridgeAnalytics/graph-benchmark](https://github.com/EastridgeAnalytics/graph-benchmark).
+
 ## Build from Source
 
 You can build from source using the instructions provided in the [developer guide](https://docs.ladybugdb.com/developer-guide/).
