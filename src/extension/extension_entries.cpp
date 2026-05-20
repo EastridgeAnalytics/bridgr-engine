@@ -27,7 +27,7 @@ static constexpr std::array llmExtensionFunctions = {"CREATE_EMBEDDING"};
 static constexpr std::array neo4jExtensionFunctions = {"NEO4J_MIGRATE"};
 static constexpr std::array algoExtensionFunctions = {"K_CORE_DECOMPOSITION", "PAGE_RANK",
     "STRONGLY_CONNECTED_COMPONENTS_KOSARAJU", "STRONGLY_CONNECTED_COMPONENTS",
-    "WEAKLY_CONNECTED_COMPONENTS"};
+    "WEAKLY_CONNECTED_COMPONENTS", "LOUVAIN", "LEIDEN"};
 
 static constexpr EntriesForExtension functionsForExtensionsRaw[] = {
     {"FTS", ftsExtensionFunctions, ftsExtensionFunctions.size()},
