@@ -198,6 +198,149 @@ class TestLouvain:
             assert "community_id" in r
 
 
+def _build_barbell_graph(db):
+    """Barbell: two cliques {A,B,C} and {D,E,F} joined by bridge C-D,
+    plus an isolated pair {G,H}. Expected: 3 connected communities."""
+    for name in ["A", "B", "C", "D", "E", "F", "G", "H"]:
+        db.create_node("Person", {"id": name.lower(), "name": name})
+
+    edges = [
+        ("a", "b"), ("a", "c"), ("b", "c"),
+        ("d", "e"), ("d", "f"), ("e", "f"),
+        ("c", "d"),
+        ("g", "h"),
+    ]
+    for src, dst in edges:
+        db.create_edge("KNOWS", src, dst, from_label="Person", to_label="Person")
+
+
+def _build_fully_connected(db, n=5):
+    """Fully connected graph of n nodes."""
+    ids = [chr(ord("a") + i) for i in range(n)]
+    for nid in ids:
+        db.create_node("Person", {"id": nid, "name": nid.upper()})
+    for i, src in enumerate(ids):
+        for dst in ids[i + 1 :]:
+            db.create_edge("KNOWS", src, dst, from_label="Person", to_label="Person")
+
+
+@algo_available
+class TestLeiden:
+    def test_leiden_basic(self, db):
+        _build_disconnected_graph(db)
+        algo = GraphAlgorithms(db)
+        results = algo.leiden("Person", "KNOWS")
+        assert len(results) == 5
+        comms = {r["community_id"] for r in results}
+        assert len(comms) == 2
+
+    def test_leiden_single_community(self, db):
+        _build_fully_connected(db, 5)
+        algo = GraphAlgorithms(db)
+        results = algo.leiden("Person", "KNOWS")
+        assert len(results) == 5
+        comms = {r["community_id"] for r in results}
+        assert len(comms) == 1
+
+    def test_leiden_empty_graph(self, db):
+        algo = GraphAlgorithms(db)
+        results = algo.leiden("Person", "KNOWS")
+        assert results == []
+
+    def test_leiden_returns_sorted(self, db):
+        _build_disconnected_graph(db)
+        algo = GraphAlgorithms(db)
+        results = algo.leiden("Person", "KNOWS")
+        keys = [(r["community_id"], r["node_id"]) for r in results]
+        assert keys == sorted(keys)
+
+    def test_leiden_resolution_low(self, db):
+        _build_barbell_graph(db)
+        algo = GraphAlgorithms(db)
+        low = algo.leiden("Person", "KNOWS", resolution=0.1)
+        default = algo.leiden("Person", "KNOWS", resolution=1.0)
+        comms_low = len({r["community_id"] for r in low})
+        comms_default = len({r["community_id"] for r in default})
+        assert comms_low <= comms_default
+
+    def test_leiden_resolution_high(self, db):
+        _build_barbell_graph(db)
+        algo = GraphAlgorithms(db)
+        default = algo.leiden("Person", "KNOWS", resolution=1.0)
+        high = algo.leiden("Person", "KNOWS", resolution=5.0)
+        comms_default = len({r["community_id"] for r in default})
+        comms_high = len({r["community_id"] for r in high})
+        assert comms_high >= comms_default
+
+    def test_leiden_communities_connected(self, db):
+        _build_barbell_graph(db)
+        algo = GraphAlgorithms(db)
+        results = algo.leiden("Person", "KNOWS")
+
+        edges = [
+            ("a", "b"), ("a", "c"), ("b", "c"),
+            ("d", "e"), ("d", "f"), ("e", "f"),
+            ("c", "d"), ("g", "h"),
+        ]
+        adj: dict[str, set[str]] = {}
+        for s, d in edges:
+            adj.setdefault(s, set()).add(d)
+            adj.setdefault(d, set()).add(s)
+
+        comm_nodes: dict[int, set[str]] = {}
+        for r in results:
+            comm_nodes.setdefault(r["community_id"], set()).add(r["node_id"])
+
+        from collections import deque
+        for members in comm_nodes.values():
+            if len(members) <= 1:
+                continue
+            start = next(iter(members))
+            visited = {start}
+            q = deque([start])
+            while q:
+                u = q.popleft()
+                for v in adj.get(u, set()):
+                    if v in members and v not in visited:
+                        visited.add(v)
+                        q.append(v)
+            assert visited == members, f"Community {members} is not connected"
+
+    def test_leiden_vs_louvain_on_barbell(self, db):
+        _build_barbell_graph(db)
+        algo = GraphAlgorithms(db)
+        leiden_results = algo.leiden("Person", "KNOWS")
+
+        edges = [
+            ("a", "b"), ("a", "c"), ("b", "c"),
+            ("d", "e"), ("d", "f"), ("e", "f"),
+            ("c", "d"), ("g", "h"),
+        ]
+        adj: dict[str, set[str]] = {}
+        for s, d in edges:
+            adj.setdefault(s, set()).add(d)
+            adj.setdefault(d, set()).add(s)
+
+        leiden_comms: dict[int, set[str]] = {}
+        for r in leiden_results:
+            leiden_comms.setdefault(r["community_id"], set()).add(r["node_id"])
+
+        from collections import deque
+        for members in leiden_comms.values():
+            if len(members) <= 1:
+                continue
+            start = next(iter(members))
+            visited = {start}
+            q = deque([start])
+            while q:
+                u = q.popleft()
+                for v in adj.get(u, set()):
+                    if v in members and v not in visited:
+                        visited.add(v)
+                        q.append(v)
+            assert visited == members
+
+
 @algo_available
 class TestSCC:
     def test_strongly_connected(self, db):

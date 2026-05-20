@@ -236,6 +236,7 @@ class TestRunAlgorithmExtension:
             "node_label": "Person",
             "edge_label": "WORKS_AT",
         })
+        assert "error" not in result, f"Algorithm failed: {result.get('error')}"
         assert result["count"] > 0
         assert "score" in result["results"][0] or "rank" in str(result["results"][0])
 
@@ -527,7 +528,7 @@ class TestTransactionTools:
 def test_tool_count():
     from bridgr.mcp_server import TOOLS
     tool_names = [t.name for t in TOOLS]
-    assert len(tool_names) == 24, f"Expected 24 tools, got {len(tool_names)}: {tool_names}"
+    assert len(tool_names) == 27, f"Expected 27 tools, got {len(tool_names)}: {tool_names}"
 
     v02_tools = {"alter_table", "run_algorithm", "bulk_import",
                  "create_vector_index", "vector_search", "hybrid_search",
@@ -539,8 +540,121 @@ def test_tool_count():
     for name in tx_tools:
         assert name in tool_names, f"Missing transaction tool: {name}"
 
+    v02_new_tools = {"resolve_entities", "save_memory", "recall_memories"}
+    for name in v02_new_tools:
+        assert name in tool_names, f"Missing v0.2 new tool: {name}"
+
 
 def test_tool_names_unique():
     from bridgr.mcp_server import TOOLS
     names = [t.name for t in TOOLS]
     assert len(names) == len(set(names)), f"Duplicate tool names: {[n for n in names if names.count(n) > 1]}"
+
+
+# ===========================================================================
+# resolve_entities
+# ===========================================================================
+
+class TestResolveEntities:
+    def test_stub_returns_not_available(self, db):
+        """ER module is not installed in the engine — returns a clear stub."""
+        result = _dispatch(db, "resolve_entities", {
+            "node_label": "Person",
+            "attributes": ["name", "age"],
+            "threshold": 0.9,
+        })
+        assert result["resolved"] is False
+        assert result["code"] == "ER_NOT_AVAILABLE"
+        assert "bridgr-agent" in result["error"] or "bridgr-platform" in result["error"]
+        assert result["node_label"] == "Person"
+        assert result["attributes"] == ["name", "age"]
+        assert result["threshold"] == 0.9
+
+    def test_stub_default_threshold(self, db):
+        result = _dispatch(db, "resolve_entities", {
+            "node_label": "Person",
+            "attributes": ["name"],
+        })
+        assert result["resolved"] is False
+        assert result["threshold"] == 0.92
+
+
+# ===========================================================================
+# save_memory
+# ===========================================================================
+
+class TestSaveMemory:
+    def test_save_new(self, db):
+        result = _dispatch(db, "save_memory", {
+            "key": "test_pref",
+            "value": "dark mode",
+            "category": "preference",
+        })
+        assert result["saved"] is True
+        assert result["action"] == "created"
+        assert result["key"] == "test_pref"
+
+    def test_save_update(self, db):
+        _dispatch(db, "save_memory", {
+            "key": "color",
+            "value": "blue",
+        })
+        result = _dispatch(db, "save_memory", {
+            "key": "color",
+            "value": "green",
+        })
+        assert result["saved"] is True
+        assert result["action"] == "updated"
+
+    def test_save_without_category(self, db):
+        result = _dispatch(db, "save_memory", {
+            "key": "no_cat",
+            "value": "some value",
+        })
+        assert result["saved"] is True
+        assert result["action"] == "created"
+
+
+# ===========================================================================
+# recall_memories
+# ===========================================================================
+
+class TestRecallMemories:
+    def test_recall_all(self, db):
+        _dispatch(db, "save_memory", {"key": "k1", "value": "v1"})
+        _dispatch(db, "save_memory", {"key": "k2", "value": "v2"})
+        result = _dispatch(db, "recall_memories", {})
+        assert result["count"] == 2
+        keys = {m["key"] for m in result["memories"]}
+        assert "k1" in keys
+        assert "k2" in keys
+
+    def test_recall_with_query(self, db):
+        _dispatch(db, "save_memory", {"key": "fruit", "value": "apple is red"})
+        _dispatch(db, "save_memory", {"key": "veggie", "value": "carrot is orange"})
+        result = _dispatch(db, "recall_memories", {"query": "apple"})
+        assert result["count"] == 1
+        assert result["memories"][0]["key"] == "fruit"
+
+    def test_recall_by_category(self, db):
+        _dispatch(db, "save_memory", {"key": "m1", "value": "x", "category": "finding"})
+        _dispatch(db, "save_memory", {"key": "m2", "value": "y", "category": "preference"})
+        result = _dispatch(db, "recall_memories", {"query": "finding"})
+        assert result["count"] == 1
+        assert result["memories"][0]["key"] == "m1"
+
+    def test_recall_with_limit(self, db):
+        for i in range(5):
+            _dispatch(db, "save_memory", {"key": f"mem_{i}", "value": f"val_{i}"})
+        result = _dispatch(db, "recall_memories", {"limit": 3})
+        assert result["count"] == 3
+
+    def test_recall_empty(self, db):
+        result = _dispatch(db, "recall_memories", {})
+        assert result["count"] == 0
+        assert result["memories"] == []
+
+    def test_recall_no_match(self, db):
+        _dispatch(db, "save_memory", {"key": "hello", "value": "world"})
+        result = _dispatch(db, "recall_memories", {"query": "zzzznotfound"})
+        assert result["count"] == 0

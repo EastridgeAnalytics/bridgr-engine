@@ -1,11 +1,12 @@
 """Bridgr MCP Server — AI agent interface to a Bridgr graph database.
 
-Exposes 24 tools: query, read_node, write_node, delete_node, create_edge,
+Exposes 27 tools: query, read_node, write_node, delete_node, create_edge,
 search, traverse_graph, list_node_types, get_edges, create_node_table,
 create_edge_table, list_schema, begin_transaction, commit_transaction,
 rollback_transaction, drop_table, alter_table, run_algorithm, bulk_import,
 create_vector_index, vector_search, hybrid_search, get_audit_log,
-export_data. Runs as a stdio MCP server.
+export_data, resolve_entities, save_memory, recall_memories.
+Runs as a stdio MCP server.
 
 Usage:
     # As a module (for Claude Code MCP config):
@@ -369,7 +370,7 @@ TOOLS = [
                 "algorithm": {
                     "type": "string",
                     "enum": [
-                        "pagerank", "wcc", "scc", "louvain", "k_core",
+                        "pagerank", "wcc", "scc", "louvain", "leiden", "k_core",
                         "degree_centrality", "shortest_path", "node_similarity",
                     ],
                     "description": "Algorithm to run.",
@@ -415,6 +416,11 @@ TOOLS = [
                     "type": "integer",
                     "description": "Max hops (shortest_path). Default: 10.",
                     "default": 10,
+                },
+                "resolution": {
+                    "type": "number",
+                    "description": "Leiden resolution parameter. Higher = more communities. Default: 1.0.",
+                    "default": 1.0,
                 },
             },
             "required": ["algorithm", "node_label", "edge_label"],
@@ -601,6 +607,83 @@ TOOLS = [
             "required": ["label", "path"],
         },
     ),
+    Tool(
+        name="resolve_entities",
+        description=(
+            "Trigger entity resolution on a node table. Identifies duplicate or "
+            "near-duplicate nodes based on attribute similarity and links them with "
+            "SAME_AS edges. Requires the bridgr-agent ER pipeline (proprietary). "
+            "Returns a stub response if the ER module is not installed."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "node_label": {
+                    "type": "string",
+                    "description": "Node table to resolve (e.g., 'Person', 'Organization').",
+                },
+                "attributes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of property names to compare for similarity (e.g., ['name', 'address', 'email']).",
+                },
+                "threshold": {
+                    "type": "number",
+                    "description": "Similarity threshold (0.0–1.0). Pairs above this are linked. Default: 0.92.",
+                    "default": 0.92,
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                },
+            },
+            "required": ["node_label", "attributes"],
+        },
+    ),
+    Tool(
+        name="save_memory",
+        description=(
+            "Save a key-value memory entry to the graph database for agent recall. "
+            "Memories persist across sessions and can be retrieved by key or keyword search."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "Unique key for this memory (e.g., 'user_preference_theme', 'case_summary').",
+                },
+                "value": {
+                    "type": "string",
+                    "description": "The memory content to store.",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Optional category for organizing memories (e.g., 'preference', 'context', 'finding').",
+                },
+            },
+            "required": ["key", "value"],
+        },
+    ),
+    Tool(
+        name="recall_memories",
+        description=(
+            "Retrieve stored memory entries. Returns all memories or filters by keyword. "
+            "Use this to recall prior context, preferences, or findings from earlier sessions."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Optional keyword to filter memories. Searches keys, values, and categories.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max memories to return. Default: 10.",
+                    "default": 10,
+                },
+            },
+        },
+    ),
 ]
 
 
@@ -613,6 +696,38 @@ def _serialize(obj: Any) -> Any:
     if isinstance(obj, (int, float, str, bool, type(None))):
         return obj
     return str(obj)
+
+
+# ---------------------------------------------------------------------------
+# Memory table helpers
+# ---------------------------------------------------------------------------
+
+_MEMORY_TABLE = "_AgentMemory"
+
+
+def _memory_timestamp() -> str:
+    """Return the current UTC timestamp as an ISO 8601 string."""
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _ensure_memory_table(db: Database) -> None:
+    """Create the _AgentMemory node table if it does not exist."""
+    existing = set()
+    result = db.execute("CALL SHOW_TABLES() RETURN name")
+    while result.has_next():
+        existing.add(result.get_next()[0])
+
+    if _MEMORY_TABLE not in existing:
+        db.execute(
+            f"CREATE NODE TABLE {_MEMORY_TABLE}("
+            f"id STRING PRIMARY KEY, "
+            f"value STRING, "
+            f"category STRING, "
+            f"created_at STRING, "
+            f"updated_at STRING)"
+        )
 
 
 def create_server(db_path: str) -> Server:
@@ -863,19 +978,17 @@ def _dispatch(db: Database, tool_name: str, args: dict) -> Any:
 
         try:
             if algorithm == "pagerank":
-                results = algo.pagerank(
-                    node_label, edge_label,
-                    damping=args.get("damping", 0.85),
-                    iterations=args.get("iterations", 20),
-                )
+                results = algo.pagerank(node_label, edge_label)
             elif algorithm == "wcc":
                 results = algo.weakly_connected_components(node_label, edge_label)
             elif algorithm == "scc":
                 results = algo.strongly_connected_components(node_label, edge_label)
             elif algorithm == "louvain":
-                results = algo.louvain(
+                results = algo.louvain(node_label, edge_label)
+            elif algorithm == "leiden":
+                results = algo.leiden(
                     node_label, edge_label,
-                    max_iterations=args.get("iterations", 10),
+                    resolution=args.get("resolution", 1.0),
                 )
             elif algorithm == "k_core":
                 results = algo.k_core(node_label, edge_label, k=args.get("k", 2))
@@ -1027,6 +1140,102 @@ def _dispatch(db: Database, tool_name: str, args: dict) -> Any:
             return {"exported": count, "path": path, "format": fmt}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    elif tool_name == "resolve_entities":
+        node_label = args["node_label"]
+        attributes = args["attributes"]
+        threshold = args.get("threshold", 0.92)
+
+        try:
+            from bridgr.er import EntityResolver  # type: ignore[import-not-found]
+            resolver = EntityResolver(db)
+            result = resolver.resolve(
+                node_label, attributes=attributes, threshold=threshold,
+            )
+            return {
+                "resolved": True,
+                "node_label": node_label,
+                "pairs_found": result.get("pairs_found", 0),
+                "edges_created": result.get("edges_created", 0),
+                "threshold": threshold,
+            }
+        except ImportError:
+            return {
+                "resolved": False,
+                "error": (
+                    "Entity resolution requires the bridgr-agent ER pipeline "
+                    "(proprietary). Install bridgr-platform or bridgr-agent to "
+                    "enable this tool. The engine provides the storage layer; "
+                    "ER logic lives in the agent."
+                ),
+                "code": "ER_NOT_AVAILABLE",
+                "node_label": node_label,
+                "attributes": attributes,
+                "threshold": threshold,
+            }
+        except Exception as e:
+            return {"resolved": False, "error": str(e), "node_label": node_label}
+
+    elif tool_name == "save_memory":
+        key = args["key"]
+        value = args["value"]
+        category = args.get("category", "")
+
+        _ensure_memory_table(db)
+        try:
+            existing = db.query(
+                f"MATCH (m:{_MEMORY_TABLE}) WHERE m.id = $key RETURN m.id",
+                {"key": key},
+            )
+            ts = _memory_timestamp()
+            if existing:
+                db.execute(
+                    f"MATCH (m:{_MEMORY_TABLE} {{id: $key}}) "
+                    f"SET m.value = $value, m.category = $category, m.updated_at = $ts",
+                    {"key": key, "value": value, "category": category, "ts": ts},
+                )
+                return {"saved": True, "key": key, "action": "updated"}
+            else:
+                db.execute(
+                    f"CREATE (:{_MEMORY_TABLE} {{id: $key, value: $value, "
+                    f"category: $category, created_at: $ts, updated_at: $ts}})",
+                    {"key": key, "value": value, "category": category, "ts": ts},
+                )
+                return {"saved": True, "key": key, "action": "created"}
+        except Exception as e:
+            return {"saved": False, "error": str(e), "key": key}
+
+    elif tool_name == "recall_memories":
+        query_str = args.get("query", "")
+        limit = args.get("limit", 10)
+
+        _ensure_memory_table(db)
+        try:
+            if query_str:
+                keyword = query_str.lower()
+                all_memories = db.query(
+                    f"MATCH (m:{_MEMORY_TABLE}) RETURN m.id AS key, "
+                    f"m.value AS value, m.category AS category, "
+                    f"m.created_at AS created_at, m.updated_at AS updated_at "
+                    f"ORDER BY m.updated_at DESC"
+                )
+                filtered = [
+                    m for m in all_memories
+                    if keyword in (m.get("key") or "").lower()
+                    or keyword in (m.get("value") or "").lower()
+                    or keyword in (m.get("category") or "").lower()
+                ]
+                memories = filtered[:limit]
+            else:
+                memories = db.query(
+                    f"MATCH (m:{_MEMORY_TABLE}) RETURN m.id AS key, "
+                    f"m.value AS value, m.category AS category, "
+                    f"m.created_at AS created_at, m.updated_at AS updated_at "
+                    f"ORDER BY m.updated_at DESC LIMIT {limit}"
+                )
+            return {"memories": memories, "count": len(memories)}
+        except Exception:
+            return {"memories": [], "count": 0}
 
     else:
         return {"error": f"Unknown tool: {tool_name}"}
