@@ -188,6 +188,47 @@ class GraphAlgorithms:
         finally:
             self._drop_graph(graph_name)
 
+    def label_propagation(
+        self,
+        node_label: str | None = None,
+        *,
+        max_iterations: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Community detection via label propagation (CDLP).
+
+        Each node adopts the most common label among its neighbors,
+        iterated until convergence or max_iterations reached.
+
+        Returns list of {node_id, label, community_id}.
+        """
+        adj, node_ids, label_map = self._build_adjacency(node_label)
+        import random
+
+        labels = {nid: i for i, nid in enumerate(node_ids)}
+        for _ in range(max_iterations):
+            changed = False
+            order = list(node_ids)
+            random.shuffle(order)
+            for nid in order:
+                neighbors = adj.get(nid, [])
+                if not neighbors:
+                    continue
+                counts: dict[int, int] = {}
+                for nb in neighbors:
+                    lb = labels[nb]
+                    counts[lb] = counts.get(lb, 0) + 1
+                best = max(counts, key=lambda k: counts[k])
+                if best != labels[nid]:
+                    labels[nid] = best
+                    changed = True
+            if not changed:
+                break
+
+        return [
+            {"node_id": nid, "label": label_map.get(nid, ""), "community_id": labels[nid]}
+            for nid in node_ids
+        ]
+
     # ------------------------------------------------------------------
     # Cypher-based algorithms
     # ------------------------------------------------------------------

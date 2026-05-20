@@ -34,6 +34,7 @@ from benchmarks.bench_utils import (
     generate_power_law_graph,
     load_algo_extension,
 )
+from bridgr.algorithms import GraphAlgorithms
 
 
 def _pick_source_node(db: Database) -> int:
@@ -225,39 +226,18 @@ def run_benchmark(
     print("  [4/6] CDLP (Label Propagation)...")
     t0 = time.monotonic()
 
-    if has_algo:
-        # Use Louvain as the best available community detection
-        graph_name = "_ga_cdlp"
-        try:
-            db.execute(f"CALL DROP_PROJECTED_GRAPH('{graph_name}')")
-        except RuntimeError:
-            pass
-        db.execute(f"CALL PROJECT_GRAPH('{graph_name}', ['Node'], ['EDGE'])")
-        try:
-            cdlp_rows = db.query(
-                f"CALL LOUVAIN('{graph_name}') "
-                f"RETURN louvain_id AS community_id, count(*) AS size "
-                f"ORDER BY size DESC LIMIT 20"
-            )
-            n_comms = len(cdlp_rows)
-            largest_comm = cdlp_rows[0]["size"] if cdlp_rows else 0
-            cdlp_summary = f"{n_comms} communities, largest: {largest_comm:,}"
-        except RuntimeError:
-            cdlp_summary = "Louvain unavailable"
-        finally:
-            try:
-                db.execute(f"CALL DROP_PROJECTED_GRAPH('{graph_name}')")
-            except RuntimeError:
-                pass
-    else:
-        # Approximate: group by connectivity pattern
-        cdlp_rows = db.query(
-            "MATCH (n:Node)-[:EDGE]-(m) "
-            "WITH n.id AS nid, count(m) AS deg "
-            "RETURN deg AS degree_bucket, count(*) AS node_count "
-            "ORDER BY node_count DESC LIMIT 10"
-        )
-        cdlp_summary = f"{len(cdlp_rows)} degree buckets (proxy)"
+    algo = GraphAlgorithms(db)
+    try:
+        cdlp_rows = algo.label_propagation("Node", max_iterations=20)
+        communities: dict[int, int] = {}
+        for row in cdlp_rows:
+            cid = row["community_id"]
+            communities[cid] = communities.get(cid, 0) + 1
+        n_comms = len(communities)
+        largest_comm = max(communities.values()) if communities else 0
+        cdlp_summary = f"{n_comms} communities, largest: {largest_comm:,}"
+    except Exception as e:
+        cdlp_summary = f"Label propagation failed: {e}"
 
     cdlp_time = time.monotonic() - t0
     results.append(AlgorithmResult(
@@ -269,46 +249,25 @@ def run_benchmark(
     ))
 
     # ------------------------------------------------------------------
-    # 5. LCC — local clustering coefficient
+    # 5. LCC — local clustering coefficient via triangle_count()
     # ------------------------------------------------------------------
     print("  [5/6] LCC (Local Clustering Coefficient)...")
     t0 = time.monotonic()
 
-    # Compute LCC for a sample of nodes (full computation is O(n*d^2))
-    sample_size = min(1000, actual_nodes)
-    sample_rows = db.query(
-        f"MATCH (n:Node) RETURN n.id AS id LIMIT {sample_size}"
-    )
-
-    lcc_values: list[float] = []
-    for row in sample_rows:
-        nid = row["id"]
-        # Count triangles and degree for this node
-        tri_result = db.query(
-            "MATCH (a:Node {id: $id})-[:EDGE]-(b)-[:EDGE]-(c)-[:EDGE]-(a) "
-            "WHERE b.id < c.id "
-            "RETURN count(*) AS triangles",
-            {"id": nid},
+    try:
+        tc_result = algo.triangle_count("Node")
+        nodes_data = tc_result.get("nodes", [])
+        lcc_values = [n["clustering_coefficient"] for n in nodes_data]
+        avg_lcc = sum(lcc_values) / len(lcc_values) if lcc_values else 0.0
+        nonzero = sum(1 for v in lcc_values if v > 0)
+        lcc_summary = (
+            f"Avg LCC: {avg_lcc:.4f}, {nonzero}/{len(lcc_values)} nonzero, "
+            f"{tc_result['total_triangles']} triangles"
         )
-        deg_result = db.query(
-            "MATCH (a:Node {id: $id})-[:EDGE]-(b) RETURN count(b) AS deg",
-            {"id": nid},
-        )
-        triangles = tri_result[0]["triangles"] if tri_result else 0
-        degree = deg_result[0]["deg"] if deg_result else 0
-
-        if degree >= 2:
-            # LCC = 2 * triangles / (degree * (degree - 1))
-            lcc = (2.0 * triangles) / (degree * (degree - 1))
-            lcc_values.append(min(lcc, 1.0))
-        else:
-            lcc_values.append(0.0)
+    except Exception as e:
+        lcc_summary = f"triangle_count failed: {e}"
 
     lcc_time = time.monotonic() - t0
-
-    avg_lcc = sum(lcc_values) / len(lcc_values) if lcc_values else 0.0
-    nonzero = sum(1 for v in lcc_values if v > 0)
-    lcc_summary = f"Avg LCC: {avg_lcc:.4f}, {nonzero}/{len(lcc_values)} nonzero"
 
     results.append(AlgorithmResult(
         name="LCC (Clustering Coeff.)",
