@@ -25,13 +25,9 @@ from pathlib import Path
 from typing import Any
 
 from bridgr.database import Database
+from bridgr.schema_utils import cypher_path as _cypher_path
 
 __all__ = ["DataExporter", "to_delta_lake", "query_to_delta_lake"]
-
-
-def _cypher_path(path: str) -> str:
-    """Convert a filesystem path to a Cypher-safe string (forward slashes, double-quoted)."""
-    return str(Path(path).resolve()).replace("\\", "/")
 
 
 class DataExporter:

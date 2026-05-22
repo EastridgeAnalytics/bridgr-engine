@@ -1,34 +1,18 @@
-"""Bridgr — AI-native embedded graph database for enterprise."""
+"""Bridgr — MIT-licensed embedded graph database engine.
+
+The open-source foundation: database CRUD, Cypher queries, 7 core algorithms,
+vector search, Delta Lake import/export, and schema utilities.
+
+Proprietary features (Leiden, temporal analytics, Snowflake connector,
+fraud scoring, streaming, ER integration, audit trail, alerts, triggers)
+are available in the ``bridgr_platform`` package.
+"""
 
 from bridgr.database import Database
-from bridgr.argus import BridgrStore
-from bridgr.migrate import migrate_case
 from bridgr.algorithms import GraphAlgorithms
 from bridgr.vector import VectorIndex
-from bridgr.audit import AuditedDatabase, AuditLog
 from bridgr.export import DataExporter, to_delta_lake, query_to_delta_lake
-from bridgr.similarity_graph import SimilarityGraphBuilder
-from bridgr.streaming import IncrementalWriter
-from bridgr.scoring import FraudScorer
-from bridgr.triggers import AlgorithmTrigger
-from bridgr.alerts import Alert, AlertEngine, AlertRule
-try:
-    from bridgr.temporal import TemporalProjection, JourneyBuilder, rolling_windows, temporal_stats
-except ImportError:
-    TemporalProjection = None  # type: ignore[assignment,misc]
-    JourneyBuilder = None  # type: ignore[assignment,misc]
-    rolling_windows = None  # type: ignore[assignment]
-    temporal_stats = None  # type: ignore[assignment]
-
-try:
-    from bridgr.connectors.snowflake import from_snowflake
-except ImportError:
-    from_snowflake = None  # type: ignore[assignment,misc]
-
-try:
-    from bridgr.kafka_consumer import BridgrKafkaConsumer
-except ImportError:
-    BridgrKafkaConsumer = None  # type: ignore[assignment,misc]
+from bridgr.schema_utils import arrow_schema_to_cypher, find_primary_key, cypher_path
 from bridgr.exceptions import (
     BridgrError,
     NodeNotFoundError,
@@ -40,36 +24,28 @@ from bridgr.exceptions import (
 
 __version__ = "0.1.0"
 __all__ = [
-    "Alert",
-    "AlertEngine",
-    "AlertRule",
-    "AlgorithmTrigger",
-    "BridgrKafkaConsumer",
-    "AuditLog",
-    "AuditedDatabase",
-    "BridgrError",
-    "BridgrStore",
-    "DataExporter",
+    # Core database
     "Database",
-    "DuplicateNodeError",
-    "EdgeNotFoundError",
-    "FraudScorer",
-    "GraphAlgorithms",
-    "IncrementalWriter",
-    "JourneyBuilder",
-    "NodeNotFoundError",
-    "SchemaError",
-    "SimilarityGraphBuilder",
-    "TemporalProjection",
-    "TransactionError",
-    "VectorIndex",
-    "from_snowflake",
-    "migrate_case",
     "open",
-    "query_to_delta_lake",
-    "rolling_windows",
-    "temporal_stats",
+    # Algorithms (MIT: WCC, Louvain, PageRank, SCC, K-Core, degree, shortest path)
+    "GraphAlgorithms",
+    # Vector search
+    "VectorIndex",
+    # Export/Import
+    "DataExporter",
     "to_delta_lake",
+    "query_to_delta_lake",
+    # Schema utilities
+    "arrow_schema_to_cypher",
+    "find_primary_key",
+    "cypher_path",
+    # Exceptions
+    "BridgrError",
+    "NodeNotFoundError",
+    "EdgeNotFoundError",
+    "DuplicateNodeError",
+    "TransactionError",
+    "SchemaError",
 ]
 
 

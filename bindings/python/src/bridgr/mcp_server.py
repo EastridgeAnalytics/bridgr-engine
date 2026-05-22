@@ -1,5 +1,15 @@
 """Bridgr MCP Server — AI agent interface to a Bridgr graph database.
 
+# Proprietary split plan (deferred to separate PR):
+# MIT tools (stay here): query, read_node, write_node, delete_node,
+#   create_edge, search, traverse_graph, list_node_types, get_edges,
+#   create_node_table, create_edge_table, list_schema (12 tools)
+# Proprietary tools (will move to bridgr_platform.mcp_server):
+#   begin_transaction, commit_transaction, rollback_transaction,
+#   drop_table, alter_table, run_algorithm, bulk_import,
+#   create_vector_index, vector_search, hybrid_search, get_audit_log,
+#   export_data, resolve_entities, save_memory, recall_memories (15 tools)
+
 Exposes 27 tools: query, read_node, write_node, delete_node, create_edge,
 search, traverse_graph, list_node_types, get_edges, create_node_table,
 create_edge_table, list_schema, begin_transaction, commit_transaction,
@@ -37,8 +47,12 @@ from bridgr.exceptions import (
 )
 from bridgr.algorithms import GraphAlgorithms
 from bridgr.vector import VectorIndex
-from bridgr.audit import AuditLog
 from bridgr.export import DataExporter
+
+try:
+    from bridgr_platform.audit import AuditLog  # Proprietary — moved to bridgr_platform
+except ImportError:
+    AuditLog = None  # type: ignore[assignment,misc]
 
 TOOLS = [
     Tool(
@@ -370,8 +384,8 @@ TOOLS = [
                 "algorithm": {
                     "type": "string",
                     "enum": [
-                        "pagerank", "wcc", "scc", "louvain", "leiden", "k_core",
-                        "degree_centrality", "shortest_path", "node_similarity",
+                        "pagerank", "wcc", "scc", "louvain", "k_core",
+                        "degree_centrality", "shortest_path",
                     ],
                     "description": "Algorithm to run.",
                 },
@@ -400,27 +414,16 @@ TOOLS = [
                 },
                 "source_id": {
                     "type": "string",
-                    "description": "Source node ID (shortest_path, node_similarity).",
+                    "description": "Source node ID (shortest_path).",
                 },
                 "target_id": {
                     "type": "string",
-                    "description": "Target node ID (shortest_path, node_similarity).",
-                },
-                "metric": {
-                    "type": "string",
-                    "enum": ["jaccard", "overlap"],
-                    "description": "Similarity metric (node_similarity). Default: jaccard.",
-                    "default": "jaccard",
+                    "description": "Target node ID (shortest_path).",
                 },
                 "max_depth": {
                     "type": "integer",
                     "description": "Max hops (shortest_path). Default: 10.",
                     "default": 10,
-                },
-                "resolution": {
-                    "type": "number",
-                    "description": "Leiden resolution parameter. Higher = more communities. Default: 1.0.",
-                    "default": 1.0,
                 },
             },
             "required": ["algorithm", "node_label", "edge_label"],
@@ -985,11 +988,13 @@ def _dispatch(db: Database, tool_name: str, args: dict) -> Any:
                 results = algo.strongly_connected_components(node_label, edge_label)
             elif algorithm == "louvain":
                 results = algo.louvain(node_label, edge_label)
-            elif algorithm == "leiden":
-                results = algo.leiden(
-                    node_label, edge_label,
-                    resolution=args.get("resolution", 1.0),
-                )
+            elif algorithm in ("leiden", "node_similarity", "triangle_count",
+                               "closeness_centrality", "betweenness_centrality",
+                               "link_prediction", "fast_rp", "label_propagation"):
+                return {
+                    "error": f"{algorithm} requires Bridgr Platform. "
+                    "Install bridgr-platform for advanced algorithms."
+                }
             elif algorithm == "k_core":
                 results = algo.k_core(node_label, edge_label, k=args.get("k", 2))
             elif algorithm == "degree_centrality":
@@ -1003,17 +1008,6 @@ def _dispatch(db: Database, tool_name: str, args: dict) -> Any:
                     "algorithm": algorithm,
                     "results": path if path else [],
                     "count": 1 if path else 0,
-                }
-            elif algorithm == "node_similarity":
-                score = algo.node_similarity(
-                    args["source_id"], args["target_id"],
-                    node_label, edge_label,
-                    metric=args.get("metric", "jaccard"),
-                )
-                return {
-                    "algorithm": algorithm,
-                    "results": [{"score": score}],
-                    "count": 1,
                 }
             else:
                 return {"error": f"Unknown algorithm: {algorithm}"}
