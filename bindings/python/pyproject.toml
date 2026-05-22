@@ -29,6 +29,9 @@ dependencies = [
 [project.optional-dependencies]
 pandas = ["pandas>=2.0"]
 deltalake = ["deltalake>=0.17.0"]
+snowflake = ["snowflake-connector-python[pandas]>=3.0"]
+streaming = ["confluent-kafka>=2.3.0"]
+all = ["pandas>=2.0", "deltalake>=0.17.0", "snowflake-connector-python[pandas]>=3.0", "confluent-kafka>=2.3.0"]
 
 [project.urls]
 Homepage = "https://github.com/EastridgeAnalytics/bridgr-engine"

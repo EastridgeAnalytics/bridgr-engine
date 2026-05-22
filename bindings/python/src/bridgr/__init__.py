@@ -12,6 +12,18 @@ from bridgr.streaming import IncrementalWriter
 from bridgr.scoring import FraudScorer
 from bridgr.triggers import AlgorithmTrigger
 from bridgr.alerts import Alert, AlertEngine, AlertRule
+try:
+    from bridgr.temporal import TemporalProjection, JourneyBuilder, rolling_windows, temporal_stats
+except ImportError:
+    TemporalProjection = None  # type: ignore[assignment,misc]
+    JourneyBuilder = None  # type: ignore[assignment,misc]
+    rolling_windows = None  # type: ignore[assignment]
+    temporal_stats = None  # type: ignore[assignment]
+
+try:
+    from bridgr.connectors.snowflake import from_snowflake
+except ImportError:
+    from_snowflake = None  # type: ignore[assignment,misc]
 
 try:
     from bridgr.kafka_consumer import BridgrKafkaConsumer
@@ -44,14 +56,19 @@ __all__ = [
     "FraudScorer",
     "GraphAlgorithms",
     "IncrementalWriter",
+    "JourneyBuilder",
     "NodeNotFoundError",
     "SchemaError",
     "SimilarityGraphBuilder",
+    "TemporalProjection",
     "TransactionError",
     "VectorIndex",
+    "from_snowflake",
     "migrate_case",
     "open",
     "query_to_delta_lake",
+    "rolling_windows",
+    "temporal_stats",
     "to_delta_lake",
 ]
 
