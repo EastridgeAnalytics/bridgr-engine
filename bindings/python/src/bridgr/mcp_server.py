@@ -8,13 +8,14 @@
 #   begin_transaction, commit_transaction, rollback_transaction,
 #   drop_table, alter_table, run_algorithm, bulk_import,
 #   create_vector_index, vector_search, hybrid_search, get_audit_log,
-#   export_data, resolve_entities, save_memory, recall_memories (15 tools)
+#   export_data, resolve_entities, save_memory, recall_memories,
+#   embed_text (16 tools)
 
-Exposes 27 tools: query, read_node, write_node, delete_node, create_edge,
+Exposes 28 tools: query, read_node, write_node, delete_node, create_edge,
 search, traverse_graph, list_node_types, get_edges, create_node_table,
 create_edge_table, list_schema, begin_transaction, commit_transaction,
 rollback_transaction, drop_table, alter_table, run_algorithm, bulk_import,
-create_vector_index, vector_search, hybrid_search, get_audit_log,
+create_vector_index, vector_search, hybrid_search, embed_text, get_audit_log,
 export_data, resolve_entities, save_memory, recall_memories.
 Runs as a stdio MCP server.
 
@@ -549,6 +550,24 @@ TOOLS = [
         },
     ),
     Tool(
+        name="embed_text",
+        description="Embed a text string into a vector for similarity search. Uses the same model as the segmentation pipeline.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "Text to embed.",
+                },
+                "model": {
+                    "type": "string",
+                    "description": "SentenceTransformer model name. Default: all-MiniLM-L6-v2.",
+                },
+            },
+            "required": ["text"],
+        },
+    ),
+    Tool(
         name="get_audit_log",
         description="Query the append-only audit trail.",
         inputSchema={
@@ -1072,6 +1091,21 @@ def _dispatch(db: Database, tool_name: str, args: dict) -> Any:
             return {"results": results, "count": len(results)}
         except Exception as e:
             return {"error": str(e)}
+
+    elif tool_name == "embed_text":
+        text = args["text"]
+        model_name = args.get("model", "all-MiniLM-L6-v2")
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError:
+            return {"error": "sentence-transformers not installed. Run: pip install sentence-transformers"}
+        if not hasattr(_dispatch, "_embed_models"):
+            _dispatch._embed_models = {}
+        if model_name not in _dispatch._embed_models:
+            _dispatch._embed_models[model_name] = SentenceTransformer(model_name)
+        model = _dispatch._embed_models[model_name]
+        vec = model.encode(text, normalize_embeddings=True).tolist()
+        return {"embedding": vec, "dimension": len(vec), "model": model_name}
 
     elif tool_name == "get_audit_log":
         target_id = args.get("target_id")
