@@ -124,14 +124,20 @@ class VectorIndex:
                     traverse_rows = self._db.query(
                         f"MATCH (n:{table_name} {{id: $nid}})"
                         f"-[:{traverse_edge}*1..{traverse_depth}]-(c) "
-                        f"RETURN DISTINCT c.id AS connected_id, "
-                        f"label(c) AS connected_label",
+                        f"RETURN DISTINCT c.*, label(c) AS _label",
                         {"nid": node_id},
                     )
-                    connected = [
-                        {"id": r["connected_id"], "label": r["connected_label"]}
-                        for r in traverse_rows
-                    ]
+                    for r in traverse_rows:
+                        props = {}
+                        label = r.get("_label", "")
+                        for k, v in r.items():
+                            if k == "_label":
+                                continue
+                            clean = k[2:] if k.startswith("c.") else k
+                            if not clean.startswith("_"):
+                                props[clean] = v
+                        props["label"] = label
+                        connected.append(props)
                 except RuntimeError:
                     pass
 
