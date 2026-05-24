@@ -95,32 +95,54 @@ class VectorIndex:
     ) -> list[dict[str, Any]]:
         """Hybrid vector+graph search: find by embedding, then traverse.
 
-        Finds k nearest neighbors, then optionally traverses edges from
-        matched nodes to return connected subgraph.
+        Two-step approach (aligned with Rust server implementation):
+        1. Pure ANN search to get matched nodes + distances.
+        2. Per-node graph traversal to collect connected neighbors.
+
+        Returns list of dicts with ``matched_node``, ``node_id``,
+        ``distance``, and ``connected`` (list of neighbor dicts).
         """
-        if traverse_edge:
-            cypher = (
-                f"CALL QUERY_VECTOR_INDEX('{table_name}', '{index_name}', "
-                f"$qvec, {k}) "
-                f"WITH node AS n, distance "
-                f"MATCH (n)-[:{traverse_edge}*1..{traverse_depth}]-(connected) "
-                f"RETURN n AS matched_node, distance, "
-                f"connected.id AS connected_id, label(connected) AS connected_label"
-            )
-        else:
-            cypher = (
-                f"CALL QUERY_VECTOR_INDEX('{table_name}', '{index_name}', "
-                f"$qvec, {k}) "
-                f"RETURN node, distance"
+        if not traverse_edge:
+            return self.search(table_name, index_name, query_vector, k)
+
+        # Step 1: Pure ANN search
+        search_results = self.search(table_name, index_name, query_vector, k)
+
+        # Step 2: For each matched node, traverse edges
+        enriched: list[dict[str, Any]] = []
+        for match in search_results:
+            node = match["node"]
+            node_id = (
+                node.get("id") or node.get("_ID") or node.get("node_id")
+                if isinstance(node, dict)
+                else str(node)
             )
 
-        result = self._db.execute(cypher, {"qvec": query_vector})
-        rows = []
-        while result.has_next():
-            row = result.get_next()
-            col_names = result.get_column_names()
-            rows.append(dict(zip(col_names, row)))
-        return rows
+            connected: list[dict[str, Any]] = []
+            if node_id:
+                try:
+                    traverse_rows = self._db.query(
+                        f"MATCH (n:{table_name} {{id: $nid}})"
+                        f"-[:{traverse_edge}*1..{traverse_depth}]-(c) "
+                        f"RETURN DISTINCT c.id AS connected_id, "
+                        f"label(c) AS connected_label",
+                        {"nid": node_id},
+                    )
+                    connected = [
+                        {"id": r["connected_id"], "label": r["connected_label"]}
+                        for r in traverse_rows
+                    ]
+                except RuntimeError:
+                    pass
+
+            enriched.append({
+                "matched_node": node if isinstance(node, dict) else {"id": node_id},
+                "node_id": node_id,
+                "distance": match["distance"],
+                "connected": connected,
+            })
+
+        return enriched
 
     def list_indices(self) -> list[dict[str, Any]]:
         """List all vector indices in the database."""
