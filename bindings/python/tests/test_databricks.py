@@ -252,6 +252,7 @@ class TestDatabricksAuth:
 
         mock_dbsql = MagicMock()
         mock_core = MagicMock()
+        mock_core.Config.return_value = "cfg_obj"
         mock_core.oauth_service_principal.return_value = "provider"
         mock_db = MagicMock()
         mock_db.sql = mock_dbsql
@@ -267,6 +268,10 @@ class TestDatabricksAuth:
                 client_id="c", client_secret="s",
             )
 
+        mock_core.Config.assert_called_once_with(
+            host="https://h", client_id="c", client_secret="s",
+        )
+        mock_core.oauth_service_principal.assert_called_once_with("cfg_obj")
         kw = mock_dbsql.connect.call_args[1]
         assert kw.get("credentials_provider") == "provider"
 

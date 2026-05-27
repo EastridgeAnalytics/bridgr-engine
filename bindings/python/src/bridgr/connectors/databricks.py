@@ -65,14 +65,14 @@ def _databricks_connect(
         connect_kwargs["schema"] = schema
 
     if client_id is not None and client_secret is not None:
-        from databricks.sdk.core import oauth_service_principal
+        from databricks.sdk.core import Config, oauth_service_principal
 
-        credentials_provider = oauth_service_principal(
+        cfg = Config(
             host=f"https://{server_hostname}",
             client_id=client_id,
             client_secret=client_secret,
         )
-        connect_kwargs["credentials_provider"] = credentials_provider
+        connect_kwargs["credentials_provider"] = oauth_service_principal(cfg)
     else:
         token = access_token or os.environ.get("DATABRICKS_TOKEN")
         if not token:
