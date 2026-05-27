@@ -69,7 +69,7 @@ struct LBUG_API ExtensionUtils {
 
     static constexpr const char* OFFICIAL_EXTENSION[] = {"HTTPFS", "POSTGRES", "DUCKDB", "JSON",
         "SQLITE", "FTS", "DELTA", "ICEBERG", "AZURE", "UNITY_CATALOG", "VECTOR", "NEO4J", "ALGO",
-        "LLM"};
+        "LLM", "PATTERN_MINING"};
 
     static constexpr const char* EXTENSION_LOADER_SUFFIX = "_loader";
 

@@ -11,12 +11,12 @@
 #   export_data, resolve_entities, save_memory, recall_memories,
 #   embed_text (16 tools)
 
-Exposes 28 tools: query, read_node, write_node, delete_node, create_edge,
+Exposes 29 tools: query, read_node, write_node, delete_node, create_edge,
 search, traverse_graph, list_node_types, get_edges, create_node_table,
 create_edge_table, list_schema, begin_transaction, commit_transaction,
 rollback_transaction, drop_table, alter_table, run_algorithm, bulk_import,
 create_vector_index, vector_search, hybrid_search, embed_text, get_audit_log,
-export_data, resolve_entities, save_memory, recall_memories.
+export_data, resolve_entities, save_memory, recall_memories, mine_patterns.
 Runs as a stdio MCP server.
 
 Usage:
@@ -706,6 +706,60 @@ TOOLS = [
             },
         },
     ),
+    Tool(
+        name="mine_patterns",
+        description=(
+            "Discover frequent path patterns and association rules in the graph. "
+            "Uses FP-Growth on graph traversals from anchor nodes. Returns rules "
+            "sorted by lift (strongest associations first)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "graph_name": {
+                    "type": "string",
+                    "description": "Name of a projected graph.",
+                },
+                "anchor_label": {
+                    "type": "string",
+                    "description": "Node label to start traversals from (e.g., 'Customer', 'Account').",
+                },
+                "edge_types": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Edge types to traverse. Empty or omitted = all edge types.",
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "description": "Max traversal depth (1-10). Default: 3.",
+                    "default": 3,
+                    "minimum": 1,
+                    "maximum": 10,
+                },
+                "min_support": {
+                    "type": "number",
+                    "description": "Minimum support threshold (0-1). Default: 0.01.",
+                    "default": 0.01,
+                },
+                "min_confidence": {
+                    "type": "number",
+                    "description": "Minimum rule confidence (0-1). Default: 0.5.",
+                    "default": 0.5,
+                },
+                "min_lift": {
+                    "type": "number",
+                    "description": "Minimum lift threshold. Default: 1.0.",
+                    "default": 1.0,
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Max rules to return. Default: 50.",
+                    "default": 50,
+                },
+            },
+            "required": ["graph_name", "anchor_label"],
+        },
+    ),
 ]
 
 
@@ -1264,6 +1318,53 @@ def _dispatch(db: Database, tool_name: str, args: dict) -> Any:
             return {"memories": memories, "count": len(memories)}
         except Exception:
             return {"memories": [], "count": 0}
+
+    elif tool_name == "mine_patterns":
+        graph_name = args["graph_name"]
+        anchor_label = args["anchor_label"]
+        edge_types = args.get("edge_types", [])
+        max_depth = min(args.get("max_depth", 3), 10)
+        min_support = args.get("min_support", 0.01)
+        min_confidence = args.get("min_confidence", 0.5)
+        min_lift = args.get("min_lift", 1.0)
+        max_results = args.get("max_results", 50)
+
+        esc = lambda s: s.replace("'", "''")
+        params = [f"anchor_label := '{esc(anchor_label)}'"]
+        if edge_types:
+            types_str = ", ".join(f"'{esc(t)}'" for t in edge_types)
+            params.append(f"edge_types := [{types_str}]")
+        params.extend([
+            f"max_depth := {max_depth}",
+            f"min_support := {min_support}",
+            f"min_confidence := {min_confidence}",
+            f"min_lift := {min_lift}",
+        ])
+
+        cypher = (
+            f"CALL MINE_PATH_PATTERNS('{esc(graph_name)}', {', '.join(params)}) "
+            f"RETURN rule_body, rule_head, support, confidence, lift, "
+            f"body_items, head_items "
+            f"ORDER BY lift DESC LIMIT {max_results}"
+        )
+
+        try:
+            rows = db.query(cypher)
+            rules = [
+                {
+                    "rule_body": row["rule_body"],
+                    "rule_head": row["rule_head"],
+                    "body_items": row["body_items"],
+                    "head_items": row["head_items"],
+                    "support": row["support"],
+                    "confidence": row["confidence"],
+                    "lift": row["lift"],
+                }
+                for row in rows
+            ]
+            return {"rules": rules, "count": len(rules)}
+        except Exception as e:
+            return {"error": str(e), "rules": [], "count": 0}
 
     else:
         return {"error": f"Unknown tool: {tool_name}"}
