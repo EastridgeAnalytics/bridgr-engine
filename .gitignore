@@ -21,6 +21,10 @@ logs/
 
 compile_commands.json
 
+### Bridgr artifacts
+*.egg-info/
+validation/*.lbug
+
 ### Python
 # Byte-compiled / optimized / DLL files
 __pycache__/
