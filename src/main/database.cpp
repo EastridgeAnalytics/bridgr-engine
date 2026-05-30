@@ -141,6 +141,12 @@ void Database::initMembers(std::string_view dbPath, construct_bm_func_t initBmFu
 
     // Load graphs from system catalog
     databaseManager->loadGraphsFromCatalog(memoryManager.get(), &clientContext);
+
+    // Register statically-linked extensions (e.g. algo/Leiden) for on-disk databases.
+    // The in-memory branch above already does this; without this call, on-disk
+    // databases never register linked extensions, so CALL LEIDEN fails with
+    // "function LEIDEN is not defined" even though algo is compiled into the binary.
+    extensionManager->autoLoadLinkedExtensions(&clientContext);
 }
 
 Database::~Database() {
