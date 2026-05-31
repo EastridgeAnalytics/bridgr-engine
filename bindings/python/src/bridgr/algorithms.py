@@ -49,6 +49,29 @@ class GraphAlgorithms:
                 pass
             self._algo_loaded = True
 
+    def _pk(self, node_label: str) -> str:
+        """Resolve a node table's declared primary-key column.
+
+        Algorithms project a graph and ``RETURN node.<pk>`` to identify each
+        node. Hardcoding ``id`` raises "Cannot find property id for node" for any
+        table whose PK isn't literally ``id`` (e.g. ``Store(store_key)``,
+        ``Identity(identity_id)``). ``table_info`` exposes the flag as
+        ``"primary key"`` (with a space) in the Python binding; fall back to the
+        first column, then ``id``.
+        """
+        try:
+            rows = self._db.query(f"CALL table_info('{node_label}') RETURN *")
+            for r in rows:
+                if r.get("primary key") or r.get("isPrimaryKey") or r.get("is_primary_key"):
+                    name = r.get("name")
+                    if name:
+                        return str(name)
+            if rows:
+                return str(rows[0].get("name", "id"))
+        except Exception:
+            pass
+        return "id"
+
     # ------------------------------------------------------------------
     # Built-in algorithms (LadybugDB algo extension)
     # ------------------------------------------------------------------
@@ -62,12 +85,13 @@ class GraphAlgorithms:
         Returns list of {node_id, component_id}.
         """
         self._ensure_algo()
+        pk = self._pk(node_label)
         graph_name = f"_wcc_{node_label}_{edge_label}"
         self._project_graph(graph_name, node_label, edge_label)
         try:
             return self._db.query(
                 f"CALL WEAKLY_CONNECTED_COMPONENTS('{graph_name}') "
-                f"RETURN node.id AS node_id, group_id AS component_id "
+                f"RETURN node.{pk} AS node_id, group_id AS component_id "
                 f"ORDER BY group_id, node_id"
             )
         finally:
@@ -87,12 +111,13 @@ class GraphAlgorithms:
         Returns list of {node_id, score} ordered by score descending.
         """
         self._ensure_algo()
+        pk = self._pk(node_label)
         graph_name = f"_pr_{node_label}_{edge_label}"
         self._project_graph(graph_name, node_label, edge_label)
         try:
             return self._db.query(
                 f"CALL PAGE_RANK('{graph_name}') "
-                f"RETURN node.id AS node_id, rank AS score "
+                f"RETURN node.{pk} AS node_id, rank AS score "
                 f"ORDER BY score DESC"
             )
         finally:
@@ -106,12 +131,13 @@ class GraphAlgorithms:
         Returns list of {node_id, community_id}.
         """
         self._ensure_algo()
+        pk = self._pk(node_label)
         graph_name = f"_louv_{node_label}_{edge_label}"
         self._project_graph(graph_name, node_label, edge_label)
         try:
             return self._db.query(
                 f"CALL LOUVAIN('{graph_name}') "
-                f"RETURN node.id AS node_id, louvain_id AS community_id "
+                f"RETURN node.{pk} AS node_id, louvain_id AS community_id "
                 f"ORDER BY louvain_id, node_id"
             )
         finally:
@@ -125,12 +151,13 @@ class GraphAlgorithms:
         Returns list of {node_id, component_id}.
         """
         self._ensure_algo()
+        pk = self._pk(node_label)
         graph_name = f"_scc_{node_label}_{edge_label}"
         self._project_graph(graph_name, node_label, edge_label)
         try:
             return self._db.query(
                 f"CALL STRONGLY_CONNECTED_COMPONENTS('{graph_name}') "
-                f"RETURN node.id AS node_id, group_id AS component_id "
+                f"RETURN node.{pk} AS node_id, group_id AS component_id "
                 f"ORDER BY group_id, node_id"
             )
         finally:
@@ -145,13 +172,16 @@ class GraphAlgorithms:
         Returns list of {node_id, core_number}.
         """
         self._ensure_algo()
+        pk = self._pk(node_label)
         graph_name = f"_kcore_{node_label}_{edge_label}"
         self._project_graph(graph_name, node_label, edge_label)
         try:
+            # The K_CORE_DECOMPOSITION procedure returns `k_degree` (not `core`);
+            # alias it to `core_number` to match the documented/consumed shape.
             return self._db.query(
                 f"CALL k_core('{graph_name}', k := {k}) "
-                f"RETURN node.id AS node_id, core "
-                f"ORDER BY core DESC, node_id"
+                f"RETURN node.{pk} AS node_id, k_degree AS core_number "
+                f"ORDER BY core_number DESC, node_id"
             )
         finally:
             self._drop_graph(graph_name)
@@ -174,10 +204,11 @@ class GraphAlgorithms:
         Returns list of {node_id, hop} representing the path, or None if no path exists.
         """
         edge = f":{edge_label}" if edge_label else ""
+        pk = self._pk(node_label)
         rows = self._db.query(
-            f"MATCH p = (a:{node_label} {{id: $from_id}})"
+            f"MATCH p = (a:{node_label} {{{pk}: $from_id}})"
             f"-[{edge}* SHORTEST 1..{max_depth}]-"
-            f"(b:{node_label} {{id: $to_id}}) "
+            f"(b:{node_label} {{{pk}: $to_id}}) "
             f"RETURN length(p) AS path_length, nodes(p) AS path_nodes",
             {"from_id": from_id, "to_id": to_id},
         )
@@ -186,7 +217,7 @@ class GraphAlgorithms:
         result = rows[0]
         if result.get("path_nodes"):
             result["path_node_ids"] = [
-                n.get("id", n.get("_ID", "")) if isinstance(n, dict) else str(n)
+                n.get(pk, n.get("_ID", "")) if isinstance(n, dict) else str(n)
                 for n in result["path_nodes"]
             ]
         return result
@@ -199,19 +230,20 @@ class GraphAlgorithms:
         Returns list of {node_id, in_degree, out_degree, total_degree}
         ordered by total_degree descending.
         """
+        pk = self._pk(node_label)
         rows = self._db.query(
-            f"MATCH (n:{node_label}) RETURN n.id AS node_id"
+            f"MATCH (n:{node_label}) RETURN n.{pk} AS node_id"
         )
         results = []
         for row in rows:
             nid = row["node_id"]
             out_result = self._db.query(
-                f"MATCH (:{node_label} {{id: $nid}})-[:{edge_label}]->() RETURN count(*) AS cnt",
+                f"MATCH (:{node_label} {{{pk}: $nid}})-[:{edge_label}]->() RETURN count(*) AS cnt",
                 {"nid": nid},
             )
             out_deg = out_result[0]["cnt"] if out_result else 0
             in_result = self._db.query(
-                f"MATCH (:{node_label} {{id: $nid}})<-[:{edge_label}]-() RETURN count(*) AS cnt",
+                f"MATCH (:{node_label} {{{pk}: $nid}})<-[:{edge_label}]-() RETURN count(*) AS cnt",
                 {"nid": nid},
             )
             in_deg = in_result[0]["cnt"] if in_result else 0
