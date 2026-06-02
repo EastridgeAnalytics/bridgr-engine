@@ -555,22 +555,36 @@ def test_tool_names_unique():
 # resolve_entities
 # ===========================================================================
 
+import importlib.util as _ilu
+
+_ER_AVAILABLE = (
+    _ilu.find_spec("er_agentic") is not None
+    and _ilu.find_spec("bridgr_platform.er_graph") is not None
+)
+
+
 class TestResolveEntities:
-    def test_stub_returns_not_available(self, db):
-        """ER module is not installed in the engine — returns a clear stub."""
+    def test_resolves_when_available_else_stub(self, db):
+        """In a pure-MIT engine deployment the proprietary ER is absent, so the
+        tool returns the ER_NOT_AVAILABLE stub. When bridgr-platform[er] is
+        installed alongside, it runs real resolution. Both echo node_label."""
         result = _dispatch(db, "resolve_entities", {
             "node_label": "Person",
             "attributes": ["name", "age"],
             "threshold": 0.9,
         })
-        assert result["resolved"] is False
-        assert result["code"] == "ER_NOT_AVAILABLE"
-        assert "bridgr-agent" in result["error"] or "bridgr-platform" in result["error"]
         assert result["node_label"] == "Person"
-        assert result["attributes"] == ["name", "age"]
-        assert result["threshold"] == 0.9
+        if _ER_AVAILABLE:
+            assert result.get("code") != "ER_NOT_AVAILABLE"
+        else:
+            assert result["resolved"] is False
+            assert result["code"] == "ER_NOT_AVAILABLE"
+            assert "bridgr-platform" in result["error"] or "er-agentic" in result["error"]
+            assert result["threshold"] == 0.9
 
     def test_stub_default_threshold(self, db):
+        if _ER_AVAILABLE:
+            pytest.skip("proprietary ER installed — stub path not exercised")
         result = _dispatch(db, "resolve_entities", {
             "node_label": "Person",
             "attributes": ["name"],

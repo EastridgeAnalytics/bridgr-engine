@@ -632,10 +632,12 @@ TOOLS = [
     Tool(
         name="resolve_entities",
         description=(
-            "Trigger entity resolution on a node table. Identifies duplicate or "
-            "near-duplicate nodes based on attribute similarity and links them with "
-            "SAME_AS edges. Requires the bridgr-agent ER pipeline (proprietary). "
-            "Returns a stub response if the ER module is not installed."
+            "Run entity resolution on a node table: identifies duplicate / "
+            "near-duplicate nodes by attribute similarity (Splink) and returns a "
+            "cluster summary. Report-only — it does not yet mutate the graph "
+            "(no SAME_AS edges / merges). Requires the proprietary ER pipeline "
+            "(er-agentic via bridgr-platform); returns a stub response if it is "
+            "not installed."
         ),
         inputSchema={
             "type": "object",
@@ -1229,26 +1231,26 @@ def _dispatch(db: Database, tool_name: str, args: dict) -> Any:
         threshold = args.get("threshold", 0.92)
 
         try:
-            from bridgr.er import EntityResolver  # type: ignore[import-not-found]
-            resolver = EntityResolver(db)
-            result = resolver.resolve(
-                node_label, attributes=attributes, threshold=threshold,
+            # Proprietary, optional. Absent in a pure-MIT deployment — degrade
+            # gracefully rather than failing. (Engine = storage; ER logic is
+            # proprietary and only imported when present.)
+            from bridgr_platform.er_graph import (  # type: ignore[import-not-found]
+                resolve_graph_entities,
             )
-            return {
-                "resolved": True,
-                "node_label": node_label,
-                "pairs_found": result.get("pairs_found", 0),
-                "edges_created": result.get("edges_created", 0),
-                "threshold": threshold,
-            }
+
+            result = resolve_graph_entities(
+                db, node_label, attributes, threshold=threshold,
+            )
+            return result.to_dict()
         except ImportError:
             return {
                 "resolved": False,
                 "error": (
-                    "Entity resolution requires the bridgr-agent ER pipeline "
-                    "(proprietary). Install bridgr-platform or bridgr-agent to "
-                    "enable this tool. The engine provides the storage layer; "
-                    "ER logic lives in the agent."
+                    "Entity resolution requires the proprietary ER pipeline "
+                    "(er-agentic, exposed via bridgr-platform). Install "
+                    "bridgr-platform[er] (or `pip install ./er`) to enable this "
+                    "tool. The engine provides the storage layer; ER logic is "
+                    "proprietary."
                 ),
                 "code": "ER_NOT_AVAILABLE",
                 "node_label": node_label,
