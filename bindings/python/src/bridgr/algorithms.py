@@ -138,6 +138,36 @@ class GraphAlgorithms:
         finally:
             self._drop_graph(graph_name)
 
+    def leiden(
+        self,
+        node_label: str,
+        edge_label: str,
+        *,
+        resolution: float = 1.0,
+        max_iterations: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Detect communities using the Leiden algorithm.
+
+        Like Louvain but guarantees internally-connected communities (repairs
+        Louvain's disconnected-community defect). Leiden is an MIT engine
+        algorithm (``CALL LEIDEN``, GVE-backed), so it lives on the MIT base
+        alongside ``louvain()``. The proprietary ``bridgr_platform`` package adds
+        an ER/Scan-integrated wrapper over this same call.
+
+        Returns list of {node_id, community_id}.
+        """
+        self._ensure_algo()
+        graph_name = f"_leid_{node_label}_{edge_label}"
+        self._project_graph(graph_name, node_label, edge_label)
+        try:
+            return self._db.query(
+                f"CALL LEIDEN('{graph_name}', resolution := {resolution}) "
+                f"RETURN node.{self._primary_key(node_label)} AS node_id, community_id "
+                f"ORDER BY community_id, node_id"
+            )
+        finally:
+            self._drop_graph(graph_name)
+
     def strongly_connected_components(
         self, node_label: str, edge_label: str
     ) -> list[dict[str, Any]]:

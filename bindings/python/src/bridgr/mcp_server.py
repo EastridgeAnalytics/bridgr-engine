@@ -1069,22 +1069,13 @@ def _dispatch(db: Database, tool_name: str, args: dict) -> Any:
             elif algorithm == "louvain":
                 results = algo.louvain(node_label, edge_label)
             elif algorithm == "leiden":
-                # Leiden is an MIT engine algorithm (CALL LEIDEN, GVE-backed).
-                # Run it directly via Cypher so the MCP tool has the same
-                # dependency-free path as Louvain — no Bridgr Platform required.
-                # The proprietary bridgr_platform.algorithms.leiden() is only an
-                # ergonomic wrapper over this same call.
-                resolution = args.get("resolution", 1.0)
-                graph_name = f"_leid_{node_label}_{edge_label}"
-                algo._project_graph(graph_name, node_label, edge_label)
-                try:
-                    results = db.query(
-                        f"CALL LEIDEN('{graph_name}', resolution := {resolution}) "
-                        f"RETURN node.{algo._primary_key(node_label)} AS node_id, "
-                        f"community_id ORDER BY community_id, node_id"
-                    )
-                finally:
-                    algo._drop_graph(graph_name)
+                # Leiden is an MIT engine algorithm (CALL LEIDEN, GVE-backed), so
+                # the MIT base GraphAlgorithms.leiden() runs it dependency-free —
+                # same path as Louvain, no Bridgr Platform required.
+                results = algo.leiden(
+                    node_label, edge_label,
+                    resolution=args.get("resolution", 1.0),
+                )
             elif algorithm in ("node_similarity", "triangle_count",
                                "closeness_centrality", "betweenness_centrality",
                                "link_prediction", "fast_rp", "label_propagation"):

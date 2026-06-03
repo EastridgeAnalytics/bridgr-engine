@@ -224,14 +224,6 @@ def _build_fully_connected(db, n=5):
             db.create_edge("KNOWS", src, dst, from_label="Person", to_label="Person")
 
 
-@pytest.mark.skip(
-    reason="By design, the MIT base bridgr.algorithms.GraphAlgorithms has no "
-    "leiden() method (it would AttributeError). Leiden the algorithm is MIT and "
-    "reachable from Python via Cypher CALL LEIDEN; the ergonomic leiden() wrapper "
-    "lives in the proprietary bridgr_platform.algorithms.GraphAlgorithms, where "
-    "these behaviours are covered. See the engine algorithms doc's 'Calling Leiden' "
-    "table. (Re-enable only if a thin leiden() is added to the MIT base.)"
-)
 @algo_available
 class TestLeiden:
     def test_leiden_basic(self, db):
