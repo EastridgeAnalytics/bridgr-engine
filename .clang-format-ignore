@@ -1,2 +1,4 @@
 # Third-party and generated; do not format
 *node_modules*
+# Vendored GVE-Leiden headers (puzzlef/leiden-communities-openmp, MIT) — kept pristine
+extension/algo/src/include/gve/*

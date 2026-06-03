@@ -1,7 +1,18 @@
 #!/bin/sh
 
-# -L returns 0 if there are any matches, which means any file containing the
-# pragma will cause this to give a exit status of 1. It's a bit hacky, but we
-# just pipe this to grep again, which exits with 0 if there are any lines and 1
-# otherwise.
-! grep -rL "^#pragma once" $1 | grep ""
+# Fail if any C/C++ HEADER under $1 lacks a "#pragma once" guard.
+#
+# Vendored third-party header trees are skipped: the GVE-Leiden headers under
+# .../gve/ (puzzlef/leiden-communities-openmp, MIT) are kept pristine, ship
+# non-header files (LICENSE, README, CITATION.cff), and include at least one
+# header that omits the guard. Anything under a third_party/ directory is
+# likewise exempt.
+#
+# (Was: `! grep -rL "^#pragma once" $1 | grep ""`, which scanned EVERY file and
+#  so flagged those vendored non-headers and the guard-less vendored header.)
+! grep -rL "^#pragma once" \
+    --include='*.h' --include='*.hpp' --include='*.hxx' --include='*.hh' --include='*.cuh' \
+    "$1" \
+  | grep -v '/gve/' \
+  | grep -v '/third_party/' \
+  | grep ""
