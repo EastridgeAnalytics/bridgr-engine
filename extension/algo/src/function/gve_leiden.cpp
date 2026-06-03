@@ -11,17 +11,16 @@
 // aggregation phases with OpenMP; we cap the thread count so it does not
 // oversubscribe alongside the engine's own task scheduler.
 
-#include <omp.h>
-
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <vector>
 
-// GVE headers (global namespace). Keep this include block first and isolated.
-#include "gve/main.hxx" // NOLINT: pulls Graph.hxx, update.hxx, leiden.hxx, etc.
+#include <omp.h>
 
+// GVE headers (global namespace). Keep this include block first and isolated.
 #include "function/gve_leiden.h"
+#include "gve/main.hxx" // NOLINT: pulls Graph.hxx, update.hxx, leiden.hxx, etc.
 
 namespace lbug {
 namespace algo_extension {
@@ -29,7 +28,7 @@ namespace algo_extension {
 std::vector<uint64_t> runGveLeiden(uint64_t numNodes, const std::vector<GveEdge>& edges,
     double resolution, int maxThreads) {
     using K = uint32_t; // GVE vertex key type
-    using V = float;     // edge weight type (matches -DTYPE=float in the verified harness)
+    using V = float;    // edge weight type (matches -DTYPE=float in the verified harness)
 
     std::vector<uint64_t> result(numNodes, 0);
     if (numNodes == 0) {

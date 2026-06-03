@@ -1,3 +1,7 @@
+#include <cstdint>
+#include <unordered_set>
+#include <vector>
+
 #include "binder/binder.h"
 #include "common/exception/runtime.h"
 #include "common/string_utils.h"
@@ -13,10 +17,6 @@
 #include "main/client_context.h"
 #include "processor/execution_context.h"
 #include "transaction/transaction.h"
-
-#include <cstdint>
-#include <unordered_set>
-#include <vector>
 
 using namespace std;
 using namespace lbug::binder;
@@ -169,10 +169,12 @@ std::vector<GveEdge> collectUndirectedEdges(const table_id_t tableId, const offs
     for (auto nodeId = 0u; nodeId < numNodes; ++nodeId) {
         const nodeID_t srcNodeId = {nodeId, tableId};
         for (auto chunk : graph->scanFwd(srcNodeId, *scanState)) {
-            chunk.forEach([&](auto neighbors, auto, auto i) { addPair(nodeId, neighbors[i].offset); });
+            chunk.forEach(
+                [&](auto neighbors, auto, auto i) { addPair(nodeId, neighbors[i].offset); });
         }
         for (auto chunk : graph->scanBwd(srcNodeId, *scanState)) {
-            chunk.forEach([&](auto neighbors, auto, auto i) { addPair(nodeId, neighbors[i].offset); });
+            chunk.forEach(
+                [&](auto neighbors, auto, auto i) { addPair(nodeId, neighbors[i].offset); });
         }
     }
     return edges;
