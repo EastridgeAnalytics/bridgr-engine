@@ -49,6 +49,27 @@ class GraphAlgorithms:
                 pass
             self._algo_loaded = True
 
+    def _primary_key(self, node_label: str) -> str:
+        """Return the declared primary-key property of a node table.
+
+        Algorithm results bind the projected node as ``node``; the business key
+        is read back via ``node.<pk>``. Hardcoding ``node.id`` broke on tables
+        whose primary key isn't named ``id`` (e.g. H-E-B's ``record_id``). This
+        mirrors the ``table_info`` lookup used elsewhere in the SDK and falls
+        back to ``id`` when the PK can't be determined.
+        """
+        try:
+            rows = self._db.query(f"CALL table_info('{node_label}') RETURN *")
+            for r in rows:
+                # `table_info` marks the PK in a column literally named
+                # "primary key" (with a space); accept camel/snake spellings too
+                # for forward-compat across engine versions.
+                if r.get("primary key") or r.get("isPrimaryKey") or r.get("is_primary_key"):
+                    return str(r.get("name", "id"))
+        except RuntimeError:
+            pass
+        return "id"
+
     # ------------------------------------------------------------------
     # Built-in algorithms (LadybugDB algo extension)
     # ------------------------------------------------------------------
@@ -67,7 +88,7 @@ class GraphAlgorithms:
         try:
             return self._db.query(
                 f"CALL WEAKLY_CONNECTED_COMPONENTS('{graph_name}') "
-                f"RETURN node.id AS node_id, group_id AS component_id "
+                f"RETURN node.{self._primary_key(node_label)} AS node_id, group_id AS component_id "
                 f"ORDER BY group_id, node_id"
             )
         finally:
@@ -92,7 +113,7 @@ class GraphAlgorithms:
         try:
             return self._db.query(
                 f"CALL PAGE_RANK('{graph_name}') "
-                f"RETURN node.id AS node_id, rank AS score "
+                f"RETURN node.{self._primary_key(node_label)} AS node_id, rank AS score "
                 f"ORDER BY score DESC"
             )
         finally:
@@ -111,7 +132,7 @@ class GraphAlgorithms:
         try:
             return self._db.query(
                 f"CALL LOUVAIN('{graph_name}') "
-                f"RETURN node.id AS node_id, louvain_id AS community_id "
+                f"RETURN node.{self._primary_key(node_label)} AS node_id, louvain_id AS community_id "
                 f"ORDER BY louvain_id, node_id"
             )
         finally:
@@ -130,7 +151,7 @@ class GraphAlgorithms:
         try:
             return self._db.query(
                 f"CALL STRONGLY_CONNECTED_COMPONENTS('{graph_name}') "
-                f"RETURN node.id AS node_id, group_id AS component_id "
+                f"RETURN node.{self._primary_key(node_label)} AS node_id, group_id AS component_id "
                 f"ORDER BY group_id, node_id"
             )
         finally:
@@ -150,7 +171,7 @@ class GraphAlgorithms:
         try:
             return self._db.query(
                 f"CALL k_core('{graph_name}', k := {k}) "
-                f"RETURN node.id AS node_id, core "
+                f"RETURN node.{self._primary_key(node_label)} AS node_id, core "
                 f"ORDER BY core DESC, node_id"
             )
         finally:
