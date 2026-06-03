@@ -248,6 +248,17 @@ class TestRunAlgorithmExtension:
         })
         assert result["count"] > 0
 
+    def test_leiden(self, db):
+        # Leiden is MIT (CALL LEIDEN) — must run via MCP without Bridgr Platform.
+        result = _dispatch(db, "run_algorithm", {
+            "algorithm": "leiden",
+            "node_label": "Person",
+            "edge_label": "WORKS_AT",
+        })
+        assert "error" not in result, f"Algorithm failed: {result.get('error')}"
+        assert result["count"] > 0
+        assert "community_id" in result["results"][0]
+
 
 # ===========================================================================
 # bulk_import
