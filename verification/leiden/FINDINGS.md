@@ -1,4 +1,20 @@
-# Leiden / Modularity Verification — Findings (2026-06-08)
+# Leiden / Modularity Verification — Findings
+
+> **STATUS 2026-06-09 — RESOLVED IN-ENGINE (read this first).** The two
+> conclusions below (CPM fixes the ER over-merge; build it on a correct base) are
+> now **implemented and verified in the MIT engine**. `CALL LEIDEN` exists and is
+> the GVE-Leiden core; weighted ingestion and the **CPM objective**
+> (`objective:='cpm', gamma:=…`) are built and green. The "no C++ toolchain" /
+> "CALL LEIDEN absent from the wheel" notes below are **historical** (they
+> described the first, wheel-only exploration on 2026-06-08); the engine is now
+> built/tested in Docker (`ghcr.io/ladybugdb/ubuntu-22.04-gcc13`, gcc-13), not
+> MSVC. See **"CPM IMPLEMENTED in the engine"** at the bottom for the engine's own
+> numbers, and **`results/cpm_verification_20260609.log`** for the captured
+> build + `e2e_test` 24/24 + harness run.
+
+---
+
+## Original exploration (2026-06-08, wheel + igraph reference)
 
 **Harness:** `verification/leiden/leiden_verify.py` (+ `sensitivity.py`)
 **What ran:** the already-compiled algo extension in the installed `real_ladybug` wheel, vs an **igraph 1.0.0** reference (Louvain, Leiden-modularity, Leiden-CPM). No C++ build (no toolchain on this machine).
