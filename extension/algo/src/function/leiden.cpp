@@ -51,6 +51,13 @@ using namespace lbug::function;
 // unweighted behavior. Weights must be non-negative (modularity is ill-defined
 // for negatives); a negative weight raises a clear runtime error. Weight reading
 // mirrors the `WeightProperty`/`WeightUtils` pattern in `spanning_forest.cpp`.
+//
+// Optional `objective := 'cpm'` switches the objective from modularity (default)
+// to the Constant Potts Model, which is resolution-limit-free and therefore does
+// not over-merge weakly-connected communities the way modularity can on
+// fragmented graphs. CPM uses `gamma := <density threshold>` (default 1.0)
+// instead of `resolution`. Both pass through the GVE bridge to a compile-time
+// objective switch (see `gve/leiden.hxx`); the modularity path is unchanged.
 
 namespace lbug {
 namespace algo_extension {
@@ -60,25 +67,31 @@ struct LeidenOptionalParams final : public MaxIterationOptionalParams {
     OptionalParam<MaxPhases> maxPhases;
     OptionalParam<Resolution> resolution;
     OptionalParam<WeightProperty> weightProperty;
+    OptionalParam<Objective> objective;
+    OptionalParam<Gamma> gamma;
 
     explicit LeidenOptionalParams(const expression_vector& optionalParams);
 
     LeidenOptionalParams(OptionalParam<MaxIterations> maxIterations,
         OptionalParam<MaxPhases> maxPhases, OptionalParam<Resolution> resolution,
-        OptionalParam<WeightProperty> weightProperty)
+        OptionalParam<WeightProperty> weightProperty, OptionalParam<Objective> objective,
+        OptionalParam<Gamma> gamma)
         : MaxIterationOptionalParams{maxIterations}, maxPhases{std::move(maxPhases)},
-          resolution{std::move(resolution)}, weightProperty{std::move(weightProperty)} {}
+          resolution{std::move(resolution)}, weightProperty{std::move(weightProperty)},
+          objective{std::move(objective)}, gamma{std::move(gamma)} {}
 
     void evaluateParams(main::ClientContext* context) override {
         MaxIterationOptionalParams::evaluateParams(context);
         maxPhases.evaluateParam(context);
         resolution.evaluateParam(context);
         weightProperty.evaluateParam(context);
+        objective.evaluateParam(context);
+        gamma.evaluateParam(context);
     }
 
     std::unique_ptr<function::OptionalParams> copy() override {
         return std::make_unique<LeidenOptionalParams>(maxIterations, maxPhases, resolution,
-            weightProperty);
+            weightProperty, objective, gamma);
     }
 };
 
@@ -92,6 +105,10 @@ LeidenOptionalParams::LeidenOptionalParams(const expression_vector& optionalPara
             resolution = function::OptionalParam<Resolution>(optionalParam);
         } else if (paramName == WeightProperty::NAME) {
             weightProperty = function::OptionalParam<WeightProperty>(optionalParam);
+        } else if (paramName == Objective::NAME) {
+            objective = function::OptionalParam<Objective>(optionalParam);
+        } else if (paramName == Gamma::NAME) {
+            gamma = function::OptionalParam<Gamma>(optionalParam);
         } else if (paramName == MaxIterations::NAME) {
             continue;
         } else {
@@ -225,6 +242,8 @@ static common::offset_t tableFunc(const TableFuncInput& input, TableFuncOutput&)
     auto& config = leidenBindData->optionalParams->constCast<LeidenOptionalParams>();
     const double resolution = config.resolution.getParamVal();
     const std::string weightProp = config.weightProperty.getParamVal();
+    const bool useCpm = (config.objective.getParamVal() == Objective::CPM);
+    const double gamma = config.gamma.getParamVal();
 
     // GVE keys are uint32_t; surface a clear error before traversing if too large.
     if (numNodes > static_cast<offset_t>(UINT32_MAX)) {
@@ -266,7 +285,8 @@ static common::offset_t tableFunc(const TableFuncInput& input, TableFuncOutput&)
     // Cap GVE's OpenMP threads to the engine's configured parallelism so it does
     // not oversubscribe alongside the engine's task scheduler.
     const int maxThreads = static_cast<int>(clientContext->getMaxNumThreadForExec());
-    finalResults.communities = runGveLeiden(numNodes, edges, resolution, maxThreads);
+    finalResults.communities =
+        runGveLeiden(numNodes, edges, resolution, maxThreads, useCpm, gamma);
 
     const auto parallelCompute = make_unique<WriteResultsVC>(mm, sharedState, finalResults);
     GDSUtils::runVertexCompute(input.context, GDSDensityState::DENSE, graph, *parallelCompute);

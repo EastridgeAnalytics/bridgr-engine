@@ -147,6 +147,7 @@ class GraphAlgorithms:
         max_iterations: int = 10,
         weight_property: str | None = None,
         objective: str = "modularity",
+        gamma: float = 1.0,
     ) -> list[dict[str, Any]]:
         """Detect communities using the Leiden algorithm.
 
@@ -157,24 +158,30 @@ class GraphAlgorithms:
         an ER/Scan-integrated wrapper over this same call.
 
         Args:
-            resolution: Modularity resolution (gamma); higher -> more, smaller
-                communities.
+            resolution: Modularity resolution; higher -> more, smaller
+                communities. Used only by the (default) ``"modularity"`` objective.
             max_iterations: Max local-moving iterations per phase (wired to the
                 engine's ``maxIterations``; previously accepted but dropped).
             weight_property: Numeric edge property to use as the edge weight
                 (e.g. a Splink ``match_probability``). ``None`` (default) leaves
                 every edge weight 1 (the historical unweighted behavior). Weights
                 must be non-negative; the engine rejects negatives.
-            objective: Only ``"modularity"`` is supported today; ``"cpm"``
-                (resolution-limit-free, the fix for ER over-merge) ships in a
-                later engine build and raises until then.
+            objective: ``"modularity"`` (default) or ``"cpm"``. CPM (Constant
+                Potts Model) is resolution-limit-free, so it does not over-merge
+                weakly-connected communities the way modularity can on fragmented
+                entity-resolution graphs; it uses ``gamma`` instead of
+                ``resolution``.
+            gamma: CPM density threshold (>0); only used when
+                ``objective="cpm"``. Larger gamma yields smaller, denser
+                communities. On Splink-style ER graphs gamma in roughly 0.25-0.5
+                removes the modularity over-merge.
 
         Returns list of {node_id, community_id}.
         """
-        if objective != "modularity":
-            raise NotImplementedError(
-                f"objective={objective!r} is not available yet; the CPM objective "
-                "ships in a later engine build. Use objective='modularity'."
+        objective = objective.lower()
+        if objective not in ("modularity", "cpm"):
+            raise ValueError(
+                f"objective={objective!r} is invalid; expected 'modularity' or 'cpm'."
             )
         self._ensure_algo()
         graph_name = f"_leid_{node_label}_{edge_label}"
@@ -182,6 +189,9 @@ class GraphAlgorithms:
             f"resolution := {float(resolution)}",
             f"maxIterations := {int(max_iterations)}",
         ]
+        if objective == "cpm":
+            args.append("objective := 'cpm'")
+            args.append(f"gamma := {float(gamma)}")
         if weight_property:
             wp = weight_property.replace("'", "''")
             args.append(f"weight_property := '{wp}'")

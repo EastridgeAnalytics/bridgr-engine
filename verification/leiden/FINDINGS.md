@@ -102,3 +102,53 @@ igraph avoids both (sequential local moving + proper refinement), which is why i
 - ~~This tested **Louvain** (Leiden binary absent from the wheel). Re-run on a Leiden-enabled build.~~ **RESOLVED 2026-06-08:** built the engine with MSVC and confirmed **on the real `CALL LEIDEN` binary** that it over-merges (89 communities for 220 entities; worst community fuses 67 distinct customers) and that **refinement does not mitigate it** (Leiden 89 ≈ Louvain 91). Phase 6 also confirmed (weighting 25→15 false-merge comms; worst-merge 67 unchanged → CPM still needed). See `results/real_leiden_shell.md`.
 - igraph Louvain is randomized (single run per cell); the engine is deterministic. The gap is large and consistent across 7 variants, so run-to-run variance does not explain it — but CI can average multiple igraph seeds for publication.
 - CPM here is igraph's (GPL — **validation only**). Shipping CPM means implementing it in the MIT engine (the separate CPM plan).
+
+---
+
+## CPM IMPLEMENTED in the engine (MIT, on the GVE base) — 2026-06-09
+
+The CPM plan above is now **built**. CPM (Constant Potts Model) was added to the
+vendored GVE-Leiden core as a compile-time objective (`bool CPM` template +
+`if constexpr`, so the modularity path is byte-identical), exposed through
+`CALL LEIDEN('g', objective:='cpm', gamma:=<density threshold>)`. The node-count
+null model is `deltaCPM = (vcout - vdout) - gamma*nv*(nv + nC - nD)` (node counts
+in place of modularity's degree-product penalty); per-community node counts are
+threaded through the local-move + coarsening phases alongside the existing
+degree-weight tracking. This is **our own MIT implementation**, not igraph.
+
+### Result — `cpm_overmerge.py` (this engine's `runGveLeiden`, not igraph)
+
+Fragmented ER graph (`fragmented_er`, seed=42): nodes=511, edges=655, true_entities=220.
+Deterministic across re-runs.
+
+| objective            | n_comms | worst_merge | max_size | B³ P | B³ R | B³ F1 | pair F1 | OCE | UCE |
+|----------------------|--------:|------------:|---------:|-----:|-----:|------:|--------:|----:|----:|
+| modularity res=1.0   |     159 |       **9** |       24 | 0.676| 1.000| 0.807 |   0.508 | 790 |   0 |
+| cpm gamma=0.05       |     180 |           6 |       12 | 0.842| 1.000| 0.914 |   0.789 | 294 |   0 |
+| cpm gamma=0.1        |     193 |           4 |        7 | 0.913| 1.000| 0.955 |   0.908 | 139 |   0 |
+| cpm gamma=0.25       |     210 |           3 |        5 | 0.976| 1.000| 0.988 |   0.982 |  33 |   0 |
+| cpm gamma=0.5        |     218 |       **2** |        5 | 0.994| 0.998| **0.996** | 0.996 |   6 |   1 |
+| cpm gamma=1.0        |     511 |       **1** |        1 | 1.000| 0.431| 0.602 |   0.000 |   0 | 291 |
+
+**Reading:** modularity over-merges (one community fuses 9 distinct entities; 790
+false merges; B³ F1 0.807). CPM monotonically removes the over-merge as gamma
+rises — at gamma≈0.5, worst_merge → 2, false merges → 6, B³ F1 → 0.996. gamma is
+a clean knob: gamma=1.0 over-splits (every node its own community: worst_merge=1
+but recall collapses). **The over-merge objective limit is closed in the MIT
+engine.** (worst_merge here is GVE-modularity's 9, not the bespoke core's 67 —
+GVE already fixed the *catastrophic* over-merge; CPM now also removes the
+*resolution-limit* residue.)
+
+### Unit tests (`leiden.test`, run via `e2e_test`, Docker gcc-13)
+
+All 14 leiden + 10 louvain cases PASS (24/24). New CPM cases:
+`CpmDenseCliqueStaysWhole` (K6, gamma=0.5 → 1 community), `CpmHighGammaSplitsToSingletons`
+(K6, gamma=2.0 → 6 singletons), `CpmResolutionLimitTwoCliquesStaySeparate`
+(two K4 + bridge, gamma=0.5 → 3 and 4 stay separate), `CpmInvalidGammaRejected`,
+`CpmInvalidObjectiveRejected`. Weighted Leiden/Louvain cases also green.
+
+### Wiring
+
+`CALL LEIDEN(objective, gamma)` → `leiden.cpp` (Objective/Gamma OptionalParams,
+validated) → `runGveLeiden(..., useCpm, gamma)` → `leidenStaticOmp<CPM>`. Modularity
+remains the default; `objective:='modularity'` and the no-arg form are unchanged.

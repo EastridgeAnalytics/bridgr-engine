@@ -259,6 +259,34 @@ inline double deltaModularity(double vcout, double vdout, double vtot, double ct
 
 
 
+#pragma region DELTA CPM
+/**
+ * Find the change in the CPM (Constant Potts Model) objective when moving a
+ * vertex from community D to C. Unlike modularity, whose null model penalizes by
+ * the product of community *degree* sums, CPM penalizes by the number of node
+ * *pairs* in a community (gamma * C(n,2)). That node-count penalty is what makes
+ * CPM resolution-limit-free: it does not let large communities silently absorb
+ * weakly-connected outsiders the way modularity does. This mirrors
+ * deltaModularity but with node counts (n) in place of degree weights and no M
+ * normalization (the CPM objective is unnormalized).
+ * @param vcout total weight of edges from vertex v to community C
+ * @param vdout total weight of edges from vertex v to community D
+ * @param vnum node count of vertex v (1 at the finest level; >1 after coarsening)
+ * @param cnum node count of community C
+ * @param dnum node count of community D (INCLUDES v, mirroring dtot in deltaModularity)
+ * @param gamma CPM resolution / density threshold (>0)
+ * @returns delta-CPM (may be negative)
+ * @see https://www.nature.com/articles/s41598-019-41695-z (Traag et al., 2019)
+ */
+inline double deltaCPM(double vcout, double vdout, double vnum, double cnum, double dnum, double gamma) {
+  ASSERT(vcout>=0 && vdout>=0 && vnum>=0 && cnum>=0 && dnum>=0 && gamma>0);
+  return (vcout - vdout) - gamma * vnum * (vnum + cnum - dnum);
+}
+#pragma endregion
+
+
+
+
 #pragma region COMMUNITIES
 /**
  * Obtain the size of each community.

@@ -34,10 +34,16 @@ struct GveEdge {
 ///        expected to have validated this.
 /// \param edges undirected edges; self-loops and duplicates are tolerated.
 /// \param resolution modularity resolution parameter (>0). 1.0 is the default.
+///        Ignored when \p useCpm is true.
 /// \param maxThreads cap on OpenMP threads GVE may use (<=0 means "engine default").
+/// \param useCpm select the CPM objective (Constant Potts Model) instead of the
+///        default modularity objective. CPM is resolution-limit-free, so it does
+///        not over-merge weakly-connected communities the way modularity can.
+/// \param gamma CPM resolution / density threshold (>0). Only used when \p useCpm
+///        is true; a community is kept only if its internal density exceeds gamma.
 /// \returns community ids, one per node offset, as uint64 (widened from GVE's uint32).
 std::vector<uint64_t> runGveLeiden(uint64_t numNodes, const std::vector<GveEdge>& edges,
-    double resolution, int maxThreads);
+    double resolution, int maxThreads, bool useCpm = false, double gamma = 1.0);
 
 } // namespace algo_extension
 } // namespace lbug

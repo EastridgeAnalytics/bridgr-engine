@@ -278,3 +278,144 @@
 -STATEMENT CALL LEIDEN('Graph', weight_property:='does_not_exist') RETURN count(DISTINCT community_id);
 ---- error(regex)
 ^.*[Cc]annot find property.*$
+
+-CASE CpmDenseCliqueStaysWhole
+-LOAD_DYNAMIC_EXTENSION algo
+-STATEMENT CREATE NODE TABLE Node(id INT64 PRIMARY KEY);
+---- ok
+-STATEMENT CREATE REL TABLE Edge(FROM Node to Node);
+---- ok
+# A 6-clique (K6): 15 internal edges, 15 node pairs. The CPM objective for the
+# whole clique as one community is 15 - gamma*15, which beats all-singletons (0)
+# iff gamma < 1. With gamma=0.5 the dense clique is kept as a single community.
+-STATEMENT CREATE (u0:Node {id: 0}),
+            (u1:Node {id: 1}),
+            (u2:Node {id: 2}),
+            (u3:Node {id: 3}),
+            (u4:Node {id: 4}),
+            (u5:Node {id: 5}),
+            (u0)-[:Edge]->(u1),
+            (u0)-[:Edge]->(u2),
+            (u1)-[:Edge]->(u2),
+            (u0)-[:Edge]->(u3),
+            (u1)-[:Edge]->(u3),
+            (u2)-[:Edge]->(u3),
+            (u0)-[:Edge]->(u4),
+            (u1)-[:Edge]->(u4),
+            (u2)-[:Edge]->(u4),
+            (u3)-[:Edge]->(u4),
+            (u0)-[:Edge]->(u5),
+            (u1)-[:Edge]->(u5),
+            (u2)-[:Edge]->(u5),
+            (u3)-[:Edge]->(u5),
+            (u4)-[:Edge]->(u5);
+---- ok
+-STATEMENT CALL PROJECT_GRAPH('Graph', ['Node'], ['Edge'])
+---- ok
+-STATEMENT CALL LEIDEN('Graph', objective:='cpm', gamma:=0.5) RETURN count(DISTINCT community_id);
+---- 1
+1
+
+-CASE CpmHighGammaSplitsToSingletons
+-LOAD_DYNAMIC_EXTENSION algo
+-STATEMENT CREATE NODE TABLE Node(id INT64 PRIMARY KEY);
+---- ok
+-STATEMENT CREATE REL TABLE Edge(FROM Node to Node);
+---- ok
+# Same K6. With gamma=2.0 (> 1) the node-pair penalty exceeds the internal
+# density of even a perfect clique, so every node stays its own community: the
+# CPM density threshold has been set above the clique's density. 6 singletons.
+-STATEMENT CREATE (u0:Node {id: 0}),
+            (u1:Node {id: 1}),
+            (u2:Node {id: 2}),
+            (u3:Node {id: 3}),
+            (u4:Node {id: 4}),
+            (u5:Node {id: 5}),
+            (u0)-[:Edge]->(u1),
+            (u0)-[:Edge]->(u2),
+            (u1)-[:Edge]->(u2),
+            (u0)-[:Edge]->(u3),
+            (u1)-[:Edge]->(u3),
+            (u2)-[:Edge]->(u3),
+            (u0)-[:Edge]->(u4),
+            (u1)-[:Edge]->(u4),
+            (u2)-[:Edge]->(u4),
+            (u3)-[:Edge]->(u4),
+            (u0)-[:Edge]->(u5),
+            (u1)-[:Edge]->(u5),
+            (u2)-[:Edge]->(u5),
+            (u3)-[:Edge]->(u5),
+            (u4)-[:Edge]->(u5);
+---- ok
+-STATEMENT CALL PROJECT_GRAPH('Graph', ['Node'], ['Edge'])
+---- ok
+-STATEMENT CALL LEIDEN('Graph', objective:='cpm', gamma:=2.0) RETURN count(DISTINCT community_id);
+---- 1
+6
+
+-CASE CpmResolutionLimitTwoCliquesStaySeparate
+-LOAD_DYNAMIC_EXTENSION algo
+-STATEMENT CREATE NODE TABLE Node(id INT64 PRIMARY KEY);
+---- ok
+-STATEMENT CREATE REL TABLE Edge(FROM Node to Node);
+---- ok
+# Two 4-cliques (0-3, 4-7) joined by a single bridge edge (3)-(4). CPM with a
+# gamma below each clique's internal density keeps each clique whole but does not
+# let the lone bridge fuse them: nodes 3 and 4 stay in different communities.
+-STATEMENT CREATE (u0:Node {id: 0}),
+            (u1:Node {id: 1}),
+            (u2:Node {id: 2}),
+            (u3:Node {id: 3}),
+            (u4:Node {id: 4}),
+            (u5:Node {id: 5}),
+            (u6:Node {id: 6}),
+            (u7:Node {id: 7}),
+            (u0)-[:Edge]->(u1),
+            (u0)-[:Edge]->(u2),
+            (u1)-[:Edge]->(u2),
+            (u0)-[:Edge]->(u3),
+            (u1)-[:Edge]->(u3),
+            (u2)-[:Edge]->(u3),
+            (u4)-[:Edge]->(u5),
+            (u4)-[:Edge]->(u6),
+            (u5)-[:Edge]->(u6),
+            (u4)-[:Edge]->(u7),
+            (u5)-[:Edge]->(u7),
+            (u6)-[:Edge]->(u7),
+            (u3)-[:Edge]->(u4);
+---- ok
+-STATEMENT CALL PROJECT_GRAPH('Graph', ['Node'], ['Edge'])
+---- ok
+-STATEMENT CALL LEIDEN('Graph', objective:='cpm', gamma:=0.5, maxphases:=50, maxiterations:=100) WITH node, community_id WHERE node.id IN [3, 4] RETURN count(DISTINCT community_id);
+---- 1
+2
+
+-CASE CpmInvalidGammaRejected
+-LOAD_DYNAMIC_EXTENSION algo
+-STATEMENT CREATE NODE TABLE Node(id INT64 PRIMARY KEY);
+---- ok
+-STATEMENT CREATE REL TABLE Edge(FROM Node to Node);
+---- ok
+-STATEMENT CREATE (u0:Node {id: 0}), (u1:Node {id: 1}), (u0)-[:Edge]->(u1);
+---- ok
+-STATEMENT CALL PROJECT_GRAPH('Graph', ['Node'], ['Edge'])
+---- ok
+# gamma must be strictly positive.
+-STATEMENT CALL LEIDEN('Graph', objective:='cpm', gamma:=0.0) RETURN count(DISTINCT community_id);
+---- error(regex)
+^.*gamma must be a positive number.*$
+
+-CASE CpmInvalidObjectiveRejected
+-LOAD_DYNAMIC_EXTENSION algo
+-STATEMENT CREATE NODE TABLE Node(id INT64 PRIMARY KEY);
+---- ok
+-STATEMENT CREATE REL TABLE Edge(FROM Node to Node);
+---- ok
+-STATEMENT CREATE (u0:Node {id: 0}), (u1:Node {id: 1}), (u0)-[:Edge]->(u1);
+---- ok
+-STATEMENT CALL PROJECT_GRAPH('Graph', ['Node'], ['Edge'])
+---- ok
+# Only 'modularity' and 'cpm' are valid objectives.
+-STATEMENT CALL LEIDEN('Graph', objective:='louvain') RETURN count(DISTINCT community_id);
+---- error(regex)
+^.*objective argument expects.*$
