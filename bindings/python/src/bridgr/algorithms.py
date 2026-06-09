@@ -145,6 +145,8 @@ class GraphAlgorithms:
         *,
         resolution: float = 1.0,
         max_iterations: int = 10,
+        weight_property: str | None = None,
+        objective: str = "modularity",
     ) -> list[dict[str, Any]]:
         """Detect communities using the Leiden algorithm.
 
@@ -154,14 +156,40 @@ class GraphAlgorithms:
         alongside ``louvain()``. The proprietary ``bridgr_platform`` package adds
         an ER/Scan-integrated wrapper over this same call.
 
+        Args:
+            resolution: Modularity resolution (gamma); higher -> more, smaller
+                communities.
+            max_iterations: Max local-moving iterations per phase (wired to the
+                engine's ``maxIterations``; previously accepted but dropped).
+            weight_property: Numeric edge property to use as the edge weight
+                (e.g. a Splink ``match_probability``). ``None`` (default) leaves
+                every edge weight 1 (the historical unweighted behavior). Weights
+                must be non-negative; the engine rejects negatives.
+            objective: Only ``"modularity"`` is supported today; ``"cpm"``
+                (resolution-limit-free, the fix for ER over-merge) ships in a
+                later engine build and raises until then.
+
         Returns list of {node_id, community_id}.
         """
+        if objective != "modularity":
+            raise NotImplementedError(
+                f"objective={objective!r} is not available yet; the CPM objective "
+                "ships in a later engine build. Use objective='modularity'."
+            )
         self._ensure_algo()
         graph_name = f"_leid_{node_label}_{edge_label}"
+        args = [
+            f"resolution := {float(resolution)}",
+            f"maxIterations := {int(max_iterations)}",
+        ]
+        if weight_property:
+            wp = weight_property.replace("'", "''")
+            args.append(f"weight_property := '{wp}'")
+        arg_str = ", ".join(args)
         self._project_graph(graph_name, node_label, edge_label)
         try:
             return self._db.query(
-                f"CALL LEIDEN('{graph_name}', resolution := {resolution}) "
+                f"CALL LEIDEN('{graph_name}', {arg_str}) "
                 f"RETURN node.{self._primary_key(node_label)} AS node_id, community_id "
                 f"ORDER BY community_id, node_id"
             )

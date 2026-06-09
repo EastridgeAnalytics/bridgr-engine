@@ -7,8 +7,17 @@
 namespace lbug {
 namespace algo_extension {
 
-using weight_t = common::offset_t;
-constexpr weight_t DEFAULT_WEIGHT = 1;
+// Edge weight type for the Louvain/Leiden in-memory CSR.
+//
+// This is `double` (not an integer) so the in-memory graph can hold fractional edge weights, e.g.
+// a Splink match probability in [0, 1] passed via `weightProperty`. When no weight property is
+// supplied, every edge defaults to `DEFAULT_WEIGHT` (1.0) and the algorithms behave exactly as the
+// historical unweighted integer implementation did. See `louvain.cpp` / `leiden.cpp`.
+//
+// Negative weights are rejected at ingestion (modularity is ill-defined for them); callers should
+// pass a non-negative weight such as a match probability or a positive transform of it.
+using weight_t = double;
+constexpr weight_t DEFAULT_WEIGHT = 1.0;
 
 struct Neighbor {
     common::offset_t neighbor;

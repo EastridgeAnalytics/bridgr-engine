@@ -1,0 +1,152 @@
+{
+  "phase0": {
+    "leiden_in_wheel": false,
+    "engine_louvain_groups": [
+      [
+        0,
+        1,
+        2
+      ],
+      [
+        3,
+        4,
+        8,
+        9
+      ],
+      [
+        5,
+        6,
+        7
+      ]
+    ],
+    "deterministic": true
+  },
+  "phase1": [
+    {
+      "fixture": "disjoint_cliques(k=8,size=6)",
+      "n_nodes": 48,
+      "n_edges": 120,
+      "true_comms": 8,
+      "engLouv_comms": 8,
+      "engLouv_nmi": 1.0,
+      "engLouv_ari": 1.0,
+      "engLouv_connected": true,
+      "igLouv_nmi": 1.0,
+      "parity_eng_vs_ig_louvain": 1.0,
+      "igLeidenMod_nmi": 1.0,
+      "igCPM_comms": 8,
+      "igCPM_nmi": 1.0
+    },
+    {
+      "fixture": "barbell(size=4)",
+      "n_nodes": 8,
+      "n_edges": 13,
+      "true_comms": 2,
+      "engLouv_comms": 2,
+      "engLouv_nmi": 1.0,
+      "engLouv_ari": 1.0,
+      "engLouv_connected": true,
+      "igLouv_nmi": 1.0,
+      "parity_eng_vs_ig_louvain": 1.0,
+      "igLeidenMod_nmi": 1.0,
+      "igCPM_comms": 1,
+      "igCPM_nmi": 0.0
+    },
+    {
+      "fixture": "planted_partition(k=5,size=20,pin=0.6,pout=0.02)",
+      "n_nodes": 100,
+      "n_edges": 678,
+      "true_comms": 5,
+      "engLouv_comms": 5,
+      "engLouv_nmi": 1.0,
+      "engLouv_ari": 1.0,
+      "engLouv_connected": true,
+      "igLouv_nmi": 1.0,
+      "parity_eng_vs_ig_louvain": 1.0,
+      "igLeidenMod_nmi": 1.0,
+      "igCPM_comms": 5,
+      "igCPM_nmi": 1.0
+    },
+    {
+      "fixture": "ring_of_cliques(k=10,size=5)",
+      "n_nodes": 50,
+      "n_edges": 110,
+      "true_comms": 10,
+      "engLouv_comms": 10,
+      "engLouv_nmi": 1.0,
+      "engLouv_ari": 1.0,
+      "engLouv_connected": true,
+      "igLouv_nmi": 1.0,
+      "parity_eng_vs_ig_louvain": 1.0,
+      "igLeidenMod_nmi": 1.0,
+      "igCPM_comms": 10,
+      "igCPM_nmi": 1.0
+    }
+  ],
+  "phase2": {
+    "graph": {
+      "n": 511,
+      "edges": 655,
+      "true_entities": 220
+    },
+    "rows": [
+      {
+        "method": "engine_louvain",
+        "bcubed_p": 0.533,
+        "bcubed_r": 1.0,
+        "bcubed_f1": 0.695,
+        "oce_false_merge": 5610,
+        "uce_false_split": 0,
+        "n_comm": 91,
+        "max_size": 67,
+        "giant": true
+      },
+      {
+        "method": "igraph_louvain",
+        "bcubed_p": 0.661,
+        "bcubed_r": 1.0,
+        "bcubed_f1": 0.796,
+        "oce_false_merge": 1103,
+        "uce_false_split": 0,
+        "n_comm": 157,
+        "max_size": 35,
+        "giant": false
+      },
+      {
+        "method": "igraph_leiden_mod",
+        "bcubed_p": 0.653,
+        "bcubed_r": 1.0,
+        "bcubed_f1": 0.79,
+        "oce_false_merge": 1077,
+        "uce_false_split": 0,
+        "n_comm": 156,
+        "max_size": 33,
+        "giant": false
+      },
+      {
+        "method": "igraph_cpm@0.05",
+        "bcubed_p": 0.842,
+        "bcubed_r": 0.996,
+        "bcubed_f1": 0.912,
+        "oce_false_merge": 266,
+        "uce_false_split": 2,
+        "n_comm": 181,
+        "max_size": 11,
+        "giant": false
+      },
+      {
+        "method": "igraph_cpm@0.1",
+        "bcubed_p": 0.912,
+        "bcubed_r": 1.0,
+        "bcubed_f1": 0.954,
+        "oce_false_merge": 137,
+        "uce_false_split": 0,
+        "n_comm": 193,
+        "max_size": 7,
+        "giant": false
+      }
+    ],
+    "verdict": "IMPLEMENTATION CONCERN \u2014 engine Louvain (0.695) is materially worse than a correct modularity reference (0.796, gap 0.101). Investigate the engine modularity core before building on it.",
+    "cpm_uplift": 0.158
+  }
+}

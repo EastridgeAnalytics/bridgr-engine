@@ -1,0 +1,26 @@
+{
+  "scale": [
+    {
+      "nodes": 10000,
+      "edges": 68259,
+      "louvain_s": 0.114,
+      "comms": 198,
+      "max_size": 100
+    },
+    {
+      "nodes": 50000,
+      "edges": 352306,
+      "louvain_s": 0.374,
+      "comms": 504,
+      "max_size": 559
+    },
+    {
+      "nodes": 100000,
+      "edges": 710066,
+      "louvain_s": 0.717,
+      "comms": 640,
+      "max_size": 998
+    }
+  ],
+  "deterministic_50k": true
+}
