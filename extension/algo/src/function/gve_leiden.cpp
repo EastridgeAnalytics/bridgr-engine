@@ -26,7 +26,7 @@ namespace lbug {
 namespace algo_extension {
 
 std::vector<uint64_t> runGveLeiden(uint64_t numNodes, const std::vector<GveEdge>& edges,
-    double resolution, int maxThreads) {
+    double resolution, int maxThreads, bool useCpm, double gamma) {
     using K = uint32_t; // GVE vertex key type
     using V = float;    // edge weight type (matches -DTYPE=float in the verified harness)
 
@@ -67,8 +67,14 @@ std::vector<uint64_t> runGveLeiden(uint64_t numNodes, const std::vector<GveEdge>
         omp_set_num_threads(maxThreads);
     }
 
-    // LeidenOptions(repeat=1, resolution, ...) — single run, honoring resolution.
-    const LeidenResult<K> a = leidenStaticOmp(x, {1, resolution});
+    // LeidenOptions(repeat, resolution, tolerance, aggregationTolerance,
+    // toleranceDrop, maxIterations, maxPasses, gamma) — single run. The CPM
+    // objective ignores `resolution` and uses `gamma`; modularity ignores
+    // `gamma`. We pass both and let the compile-time objective pick.
+    LeidenOptions opts(1, resolution);
+    opts.gamma = gamma;
+    const LeidenResult<K> a = useCpm ? leidenStaticOmp<true>(x, opts)
+                                     : leidenStaticOmp<false>(x, opts);
 
     omp_set_num_threads(savedThreads);
 

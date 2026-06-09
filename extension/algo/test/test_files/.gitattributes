@@ -1,0 +1,4 @@
+# The e2e test runner compares answer lines verbatim; a stray CR (from a Windows
+# checkout with core.autocrlf=true) appends "\r" to each expected tuple and fails
+# every comparison. Force LF on the .test fixtures regardless of platform.
+*.test text eol=lf

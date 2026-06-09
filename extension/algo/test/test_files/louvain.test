@@ -184,3 +184,112 @@
 ---- 2
 0|4|[0,1,2,3]
 4|4|[4,5,6,7]
+
+-CASE WeightedMergesTwoCliques
+-LOAD_DYNAMIC_EXTENSION algo
+-STATEMENT CREATE NODE TABLE Node(id INT64 PRIMARY KEY);
+---- ok
+-STATEMENT CREATE REL TABLE Edge(FROM Node to Node, w DOUBLE);
+---- ok
+# Two 4-cliques (0-3 and 4-7) joined by a single bridge edge (3)-(4).
+# Intra-clique edges are light (w=1); the bridge is very heavy (w=1000).
+# Unweighted -> two communities; weighted on `w` -> the heavy bridge pulls the
+# two cliques into a single community, so the distinct community count drops 2 -> 1.
+-STATEMENT CREATE (u0:Node {id: 0}),
+            (u1:Node {id: 1}),
+            (u2:Node {id: 2}),
+            (u3:Node {id: 3}),
+            (u4:Node {id: 4}),
+            (u5:Node {id: 5}),
+            (u6:Node {id: 6}),
+            (u7:Node {id: 7}),
+            (u0)-[:Edge {w: 1.0}]->(u1),
+            (u0)-[:Edge {w: 1.0}]->(u2),
+            (u1)-[:Edge {w: 1.0}]->(u2),
+            (u0)-[:Edge {w: 1.0}]->(u3),
+            (u1)-[:Edge {w: 1.0}]->(u3),
+            (u2)-[:Edge {w: 1.0}]->(u3),
+            (u4)-[:Edge {w: 1.0}]->(u5),
+            (u4)-[:Edge {w: 1.0}]->(u6),
+            (u5)-[:Edge {w: 1.0}]->(u6),
+            (u4)-[:Edge {w: 1.0}]->(u7),
+            (u5)-[:Edge {w: 1.0}]->(u7),
+            (u6)-[:Edge {w: 1.0}]->(u7),
+            (u3)-[:Edge {w: 1000.0}]->(u4);
+---- ok
+-STATEMENT CALL PROJECT_GRAPH('Graph', ['Node'], ['Edge'])
+---- ok
+# Unweighted: nodes 3 and 4 sit in their own (different) cliques -> 2 distinct communities.
+-STATEMENT CALL LOUVAIN('Graph', maxphases:=50, maxiterations:=100) WITH node, louvain_id WHERE node.id IN [3, 4] RETURN count(DISTINCT louvain_id);
+---- 1
+2
+# Weighted on the heavy bridge: the w=1000 edge pulls nodes 3 and 4 into the SAME community.
+-STATEMENT CALL LOUVAIN('Graph', maxphases:=50, maxiterations:=100, weight_property:='w') WITH node, louvain_id WHERE node.id IN [3, 4] RETURN count(DISTINCT louvain_id);
+---- 1
+1
+
+-CASE UniformWeightMatchesUnweighted
+-LOAD_DYNAMIC_EXTENSION algo
+-STATEMENT CREATE NODE TABLE Node(id INT64 PRIMARY KEY);
+---- ok
+-STATEMENT CREATE REL TABLE Edge(FROM Node to Node, w DOUBLE);
+---- ok
+# Same topology as the `Basic` case but every edge carries weight 1.0. Running with
+# weight_property:='w' must reproduce the unweighted partition exactly (regression guard
+# for the integer -> double weight_t refactor).
+-STATEMENT CREATE (u0:Node {id: 0}),
+            (u1:Node {id: 1}),
+            (u2:Node {id: 2}),
+            (u3:Node {id: 3}),
+            (u4:Node {id: 4}),
+            (u5:Node {id: 5}),
+            (u0)-[:Edge {w: 1.0}]->(u1),
+            (u0)-[:Edge {w: 1.0}]->(u2),
+            (u1)-[:Edge {w: 1.0}]->(u2),
+            (u3)-[:Edge {w: 1.0}]->(u4),
+            (u3)-[:Edge {w: 1.0}]->(u5),
+            (u4)-[:Edge {w: 1.0}]->(u5),
+            (u2)-[:Edge {w: 1.0}]->(u3);
+---- ok
+-STATEMENT CALL PROJECT_GRAPH('Graph', ['Node'], ['Edge'])
+---- ok
+-STATEMENT CALL LOUVAIN('Graph') WITH louvain_id, min(node.id) as louvainId, count(*) as nodeCount, list_sort(collect(node.id)) as nodeIds RETURN louvainId, nodeCount, nodeIds ORDER BY louvainId;
+---- 2
+0|3|[0,1,2]
+3|3|[3,4,5]
+-STATEMENT CALL LOUVAIN('Graph', weight_property:='w') WITH louvain_id, min(node.id) as louvainId, count(*) as nodeCount, list_sort(collect(node.id)) as nodeIds RETURN louvainId, nodeCount, nodeIds ORDER BY louvainId;
+---- 2
+0|3|[0,1,2]
+3|3|[3,4,5]
+
+-CASE NegativeWeightRejected
+-LOAD_DYNAMIC_EXTENSION algo
+-STATEMENT CREATE NODE TABLE Node(id INT64 PRIMARY KEY);
+---- ok
+-STATEMENT CREATE REL TABLE Edge(FROM Node to Node, w DOUBLE);
+---- ok
+-STATEMENT CREATE (u0:Node {id: 0}),
+            (u1:Node {id: 1}),
+            (u0)-[:Edge {w: -1.0}]->(u1);
+---- ok
+-STATEMENT CALL PROJECT_GRAPH('Graph', ['Node'], ['Edge'])
+---- ok
+# Negative weights are rejected: modularity is ill-defined for them.
+-STATEMENT CALL LOUVAIN('Graph', weight_property:='w') RETURN count(DISTINCT louvain_id);
+---- error(regex)
+^.*[Nn]egative weight.*$
+
+-CASE MissingWeightPropertyRejected
+-LOAD_DYNAMIC_EXTENSION algo
+-STATEMENT CREATE NODE TABLE Node(id INT64 PRIMARY KEY);
+---- ok
+-STATEMENT CREATE REL TABLE Edge(FROM Node to Node, w DOUBLE);
+---- ok
+-STATEMENT CREATE (u0:Node {id: 0}), (u1:Node {id: 1}), (u0)-[:Edge {w: 1.0}]->(u1);
+---- ok
+-STATEMENT CALL PROJECT_GRAPH('Graph', ['Node'], ['Edge'])
+---- ok
+# Referencing a property that does not exist on the rel table is a clear error.
+-STATEMENT CALL LOUVAIN('Graph', weight_property:='does_not_exist') RETURN count(DISTINCT louvain_id);
+---- error(regex)
+^.*[Cc]annot find property.*$

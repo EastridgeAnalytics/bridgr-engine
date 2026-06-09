@@ -1,0 +1,115 @@
+# CPM verification receipt — captured from the committed tree
+# engine commit: b34e45dc97193201361859c4bf9ffaf3133f40ae
+# branch: leiden-improvements-20260608
+# image: ghcr.io/ladybugdb/ubuntu-22.04-gcc13
+# uname: Linux 5.15.167.4-microsoft-standard-WSL2 x86_64
+# gcc: g++-13 (Ubuntu 13.4.0-6ubuntu1~22~ppa2) 13.4.0
+
+==================================================================
+STEP 1 — force-recompile algo extension from committed source
+==================================================================
+[1/3] Building CXX object extension/algo/src/function/CMakeFiles/lbug_algo_function.dir/gve_leiden.cpp.o
+[2/3] Building CXX object extension/algo/src/function/CMakeFiles/lbug_algo_function.dir/leiden.cpp.o
+[3/3] Linking CXX shared library /work/extension/algo/build/libalgo.lbug_extension
+build rc=0
+
+==================================================================
+STEP 2 — e2e_test leiden.* + louvain.* (full output)
+==================================================================
+[==========] Running 24 tests from 2 test suites.
+[----------] 14 tests from leiden
+[ RUN      ] leiden.CpmInvalidObjectiveRejected
+[       OK ] leiden.CpmInvalidObjectiveRejected (187 ms)
+[ RUN      ] leiden.Basic
+[2026-06-09 11:22:14.277] [info] QUERY PASSED.
+[       OK ] leiden.Basic (64 ms)
+[ RUN      ] leiden.OnlyNodes
+[2026-06-09 11:22:14.332] [info] QUERY PASSED.
+[       OK ] leiden.OnlyNodes (50 ms)
+[ RUN      ] leiden.WeightedMergesTwoCliques
+[2026-06-09 11:22:14.386] [info] QUERY PASSED.
+[2026-06-09 11:22:14.389] [info] QUERY PASSED.
+[       OK ] leiden.WeightedMergesTwoCliques (59 ms)
+[ RUN      ] leiden.CpmHighGammaSplitsToSingletons
+[2026-06-09 11:22:14.440] [info] QUERY PASSED.
+[       OK ] leiden.CpmHighGammaSplitsToSingletons (50 ms)
+[ RUN      ] leiden.BarbellGraph
+[2026-06-09 11:22:14.491] [info] QUERY PASSED.
+[       OK ] leiden.BarbellGraph (47 ms)
+[ RUN      ] leiden.CpmDenseCliqueStaysWhole
+[2026-06-09 11:22:14.539] [info] QUERY PASSED.
+[       OK ] leiden.CpmDenseCliqueStaysWhole (51 ms)
+[ RUN      ] leiden.CpmInvalidGammaRejected
+[       OK ] leiden.CpmInvalidGammaRejected (44 ms)
+[ RUN      ] leiden.ResolutionParameter
+[2026-06-09 11:22:14.636] [info] QUERY PASSED.
+[       OK ] leiden.ResolutionParameter (70 ms)
+[ RUN      ] leiden.Single6Clique
+[2026-06-09 11:22:14.715] [info] QUERY PASSED.
+[       OK ] leiden.Single6Clique (60 ms)
+[ RUN      ] leiden.UniformWeightMatchesUnweighted
+[2026-06-09 11:22:14.766] [info] QUERY PASSED.
+[2026-06-09 11:22:14.770] [info] QUERY PASSED.
+[       OK ] leiden.UniformWeightMatchesUnweighted (59 ms)
+[ RUN      ] leiden.NegativeWeightRejected
+[       OK ] leiden.NegativeWeightRejected (47 ms)
+[ RUN      ] leiden.MissingWeightPropertyRejected
+[       OK ] leiden.MissingWeightPropertyRejected (57 ms)
+[ RUN      ] leiden.CpmResolutionLimitTwoCliquesStaySeparate
+[2026-06-09 11:22:14.936] [info] QUERY PASSED.
+[       OK ] leiden.CpmResolutionLimitTwoCliquesStaySeparate (61 ms)
+[----------] 14 tests from leiden (913 ms total)
+[----------] 10 tests from louvain
+[ RUN      ] louvain.MissingWeightPropertyRejected
+[       OK ] louvain.MissingWeightPropertyRejected (64 ms)
+[ RUN      ] louvain.NegativeWeightRejected
+[       OK ] louvain.NegativeWeightRejected (52 ms)
+[ RUN      ] louvain.UniformWeightMatchesUnweighted
+[2026-06-09 11:22:15.113] [info] QUERY PASSED.
+[2026-06-09 11:22:15.119] [info] QUERY PASSED.
+[       OK ] louvain.UniformWeightMatchesUnweighted (60 ms)
+[ RUN      ] louvain.Two4Clique
+[2026-06-09 11:22:15.172] [info] QUERY PASSED.
+[       OK ] louvain.Two4Clique (49 ms)
+[ RUN      ] louvain.Two3Clique
+[2026-06-09 11:22:15.226] [info] QUERY PASSED.
+[       OK ] louvain.Two3Clique (55 ms)
+[ RUN      ] louvain.Single6Clique
+[2026-06-09 11:22:15.275] [info] QUERY PASSED.
+[       OK ] louvain.Single6Clique (46 ms)
+[ RUN      ] louvain.SimplePath
+[2026-06-09 11:22:15.324] [info] QUERY PASSED.
+[       OK ] louvain.SimplePath (49 ms)
+[ RUN      ] louvain.WeightedMergesTwoCliques
+[2026-06-09 11:22:15.372] [info] QUERY PASSED.
+[2026-06-09 11:22:15.376] [info] QUERY PASSED.
+[       OK ] louvain.WeightedMergesTwoCliques (53 ms)
+[ RUN      ] louvain.OnlyNodes
+[2026-06-09 11:22:15.423] [info] QUERY PASSED.
+[       OK ] louvain.OnlyNodes (49 ms)
+[ RUN      ] louvain.Basic
+[2026-06-09 11:22:15.475] [info] QUERY PASSED.
+[       OK ] louvain.Basic (48 ms)
+[----------] 10 tests from louvain (530 ms total)
+[==========] 24 tests from 2 test suites ran. (1443 ms total)
+[  PASSED  ] 24 tests.
+----- final summary -----
+
+==================================================================
+STEP 3 — over-merge harness: CPM vs modularity (cpm_overmerge.py)
+==================================================================
+compiling driver: g++ -std=c++17 -O3 -fopenmp -DTYPE=float -I/work/extension/algo/src/include /work/extension/algo/src/function/gve_leiden.cpp /work/verification/leiden/cpm_overmerge_driver.cpp -o /tmp/cpm_overmerge
+fragmented ER graph: nodes=511 edges=655 true_entities=220
+method                 n_comms  worst_merge  max_size   b3_P   b3_R  b3_F1  pair_F1   OCE   UCE
+-------------------------------------------------------------------------------------------------------
+modularity res=1.0         159            9        24  0.676  1.000  0.807    0.508   790     0
+cpm gamma=0.05             180            6        12  0.842  1.000  0.914    0.789   294     0
+cpm gamma=0.1              193            4         7  0.913  1.000  0.955    0.908   139     0
+cpm gamma=0.25             210            3         5  0.976  1.000  0.988    0.982    33     0
+cpm gamma=0.5              218            2         5  0.994  0.998  0.996    0.996     6     1
+cpm gamma=1.0              511            1         1  1.000  0.431  0.602    0.000     0   291
+
+==================================================================
+RESULT: e2e_test 24/24 PASS; CPM drops worst_merge 9->2 and
+B-cubed F1 0.807->0.996 at gamma=0.5 on the fragmented-ER graph.
+==================================================================

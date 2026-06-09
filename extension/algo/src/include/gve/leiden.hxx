@@ -45,6 +45,8 @@ struct LeidenOptions {
   int maxIterations;
   /** Maximum number of passes [10]. */
   int maxPasses;
+  /** CPM resolution / density threshold; only used by the CPM objective [1]. */
+  double gamma;
   #pragma endregion
 
 
@@ -58,9 +60,10 @@ struct LeidenOptions {
    * @param toleranceDrop tolerance drop factor after each pass [10]
    * @param maxIterations maximum number of iterations per pass [20]
    * @param maxPasses maximum number of passes [10]
+   * @param gamma CPM resolution / density threshold (CPM objective only) [1]
    */
-  LeidenOptions(int repeat=1, double resolution=1, double tolerance=1e-2, double aggregationTolerance=0.8, double toleranceDrop=10, int maxIterations=20, int maxPasses=10) :
-  repeat(repeat), resolution(resolution), tolerance(tolerance), aggregationTolerance(aggregationTolerance), toleranceDrop(toleranceDrop), maxIterations(maxIterations), maxPasses(maxPasses) {}
+  LeidenOptions(int repeat=1, double resolution=1, double tolerance=1e-2, double aggregationTolerance=0.8, double toleranceDrop=10, int maxIterations=20, int maxPasses=10, double gamma=1) :
+  repeat(repeat), resolution(resolution), tolerance(tolerance), aggregationTolerance(aggregationTolerance), toleranceDrop(toleranceDrop), maxIterations(maxIterations), maxPasses(maxPasses), gamma(gamma) {}
   #pragma endregion
 };
 
@@ -300,6 +303,52 @@ inline void leidenInitializeOmpW(vector<K>& vcom, vector<W>& ctot, const G& x, c
 #endif
 
 
+#ifdef OPENMP
+/**
+ * CPM: initialize per-community node counts for a singleton partition.
+ * Companion to leidenInitializeOmpW (each vertex is its own community); tracks
+ * node counts (cnum[u]=vnum[u]) instead of edge weights. CPM path only — call it
+ * immediately after each leidenInitializeOmpW so cnum stays in lockstep with ctot.
+ * @param cnum community node count (updated, must be zero-initialized to span)
+ * @param x graph
+ * @param vnum node count of each vertex
+ */
+template <class G, class W>
+inline void leidenInitializeCnumOmpW(vector<W>& cnum, const G& x, const vector<W>& vnum) {
+  using  K = typename G::key_type;
+  size_t S = x.span();
+  #pragma omp parallel for schedule(static, 2048)
+  for (K u=0; u<S; ++u) {
+    if (!x.hasVertex(u)) continue;
+    cnum[u] = vnum[u];
+  }
+}
+
+
+/**
+ * CPM: compute node counts for the aggregated (coarsened) graph. Each new
+ * super-vertex c accumulates the node counts of the previous-level vertices
+ * mapped to it (vcom[u] -> c). CPM analogue of recomputing vtot after
+ * aggregation. CPM path only.
+ * @param vnumNew node count of each aggregated vertex (updated, zero-initialized to CN)
+ * @param x previous-level graph
+ * @param vcom previous-level vertex -> aggregated community (0..CN-1)
+ * @param vnumOld node count of each previous-level vertex
+ */
+template <class G, class K, class W>
+inline void leidenAggregateVertexNumsOmpW(vector<W>& vnumNew, const G& x, const vector<K>& vcom, const vector<W>& vnumOld) {
+  size_t S = x.span();
+  #pragma omp parallel for schedule(static, 2048)
+  for (K u=0; u<S; ++u) {
+    if (!x.hasVertex(u)) continue;
+    K c = vcom[u];
+    #pragma omp atomic
+    vnumNew[c] += vnumOld[u];
+  }
+}
+#endif
+
+
 /**
  * Initialize communities from given initial communities.
  * @param vcom community each vertex belongs to (updated, must be initialized)
@@ -503,6 +552,32 @@ inline auto leidenChooseCommunity(const G& x, K u, const vector<K>& vcom, const 
 
 
 /**
+ * CPM variant of leidenChooseCommunity: picks the connected community with the
+ * best delta-CPM (node-count null model) rather than delta-modularity.
+ * @param x graph
+ * @param u given vertex
+ * @param vcom community each vertex belongs to
+ * @param vnum node count of each vertex
+ * @param cnum node count of each community
+ * @param vcs communities vertex u is linked to
+ * @param vcout total edge weight from vertex u to community C
+ * @param gamma CPM resolution / density threshold (>0)
+ * @returns [best community, delta-CPM]
+ */
+template <bool SELF=false, class G, class K, class W>
+inline auto leidenChooseCommunityCpm(const G& x, K u, const vector<K>& vcom, const vector<W>& vnum, const vector<W>& cnum, const vector<K>& vcs, const vector<W>& vcout, double gamma) {
+  K cmax = K(), d = vcom[u];
+  W emax = W();
+  for (K c : vcs) {
+    if (!SELF && c==d) continue;
+    W e = deltaCPM(vcout[c], vcout[d], vnum[u], cnum[c], cnum[d], gamma);
+    if (e>emax) { emax = e; cmax = c; }
+  }
+  return make_pair(cmax, emax);
+}
+
+
+/**
  * Move vertex to another community C.
  * @param vcom community each vertex belongs to (updated)
  * @param ctot total edge weight of each community (updated)
@@ -552,6 +627,53 @@ inline bool leidenChangeCommunityOmpW(vector<K>& vcom, vector<W>& ctot, const G&
   }
   #pragma omp atomic
   ctot[c] += vtot[u];
+  vcom[u] = c;
+  return true;
+}
+
+
+/**
+ * CPM variant of leidenChangeCommunityOmpW: maintains community node counts
+ * (cnum) in addition to community edge weights (ctot). The refinement guard
+ * stays on ctot, which is a valid "this community has grown beyond the vertex"
+ * signal in both objectives (a refinement merge adds a non-zero-degree vertex,
+ * so ctot strictly grows on every successful refine move).
+ * @param vcom community each vertex belongs to (updated)
+ * @param ctot total edge weight of each community (updated)
+ * @param cnum total node count of each community (updated)
+ * @param x graph
+ * @param u given vertex
+ * @param c community to move to
+ * @param vtot total edge weight of each vertex
+ * @param vnum node count of each vertex
+ * @returns whether the move was applied
+ */
+template <bool REFINE=false, class G, class K, class W>
+inline bool leidenChangeCommunityCpmOmpW(vector<K>& vcom, vector<W>& ctot, vector<W>& cnum, const G& x, K u, K c, const vector<W>& vtot, const vector<W>& vnum) {
+  K d = vcom[u];
+  if (REFINE) {
+    W ctotd = W();
+    #pragma omp atomic capture
+    {
+      ctotd    = ctot[d];
+      ctot[d] -= vtot[u];
+    }
+    if (ctotd  > vtot[u]) {
+      #pragma omp atomic
+      ctot[d] += vtot[u];
+      return false;
+    }
+  }
+  else {
+    #pragma omp atomic
+    ctot[d] -= vtot[u];
+  }
+  #pragma omp atomic
+  ctot[c] += vtot[u];
+  #pragma omp atomic
+  cnum[d] -= vnum[u];
+  #pragma omp atomic
+  cnum[c] += vnum[u];
   vcom[u] = c;
   return true;
 }
@@ -637,13 +759,17 @@ inline int leidenMoveW(vector<K>& vcom, vector<W>& ctot, vector<B>& vaff, vector
  * @param vtot total edge weight of each vertex
  * @param M total weight of "undirected" graph (1/2 of directed graph)
  * @param R resolution (0, 1]
+ * @param gamma CPM resolution / density threshold (CPM only)
  * @param L max iterations
  * @param fc has local moving phase converged?
  * @param fa is vertex allowed to be updated?
  * @returns iterations performed (0 if converged already)
+ * @tparam CPM use the CPM objective (node-count null model) instead of modularity
+ * @note When CPM=false the cnum/vnum/gamma arguments are accepted but unused, so
+ *       the modularity path is byte-identical to the upstream implementation.
  */
-template <bool REFINE=false, class G, class K, class W, class B, class FC, class FA>
-inline int leidenMoveOmpW(vector<K>& vcom, vector<W>& ctot, vector<B>& vaff, vector<vector<K>*>& vcs, vector<vector<W>*>& vcout, const G& x, const vector<K>& vcob, const vector<W>& vtot, double M, double R, int L, FC fc, FA fa) {
+template <bool REFINE=false, bool CPM=false, class G, class K, class W, class B, class FC, class FA>
+inline int leidenMoveOmpW(vector<K>& vcom, vector<W>& ctot, vector<W>& cnum, vector<B>& vaff, vector<vector<K>*>& vcs, vector<vector<W>*>& vcout, const G& x, const vector<K>& vcob, const vector<W>& vtot, const vector<W>& vnum, double M, double R, double gamma, int L, FC fc, FA fa) {
   size_t S = x.span();
   int l = 0;
   W  el = W();
@@ -657,8 +783,15 @@ inline int leidenMoveOmpW(vector<K>& vcom, vector<W>& ctot, vector<B>& vaff, vec
       if (REFINE && ctot[vcom[u]]>vtot[u]) continue;
       leidenClearScanW(*vcs[t], *vcout[t]);
       leidenScanCommunitiesW<false, REFINE>(*vcs[t], *vcout[t], x, u, vcom, vcob);
-      auto [c, e] = leidenChooseCommunity(x, u, vcom, vtot, ctot, *vcs[t], *vcout[t], M, R);
-      if (c && leidenChangeCommunityOmpW<REFINE>(vcom, ctot, x, u, c, vtot)) x.forEachEdgeKey(u, [&](auto v) { vaff[v] = B(1); });
+      K c = K(); W e = W();
+      if constexpr (CPM) std::tie(c, e) = leidenChooseCommunityCpm(x, u, vcom, vnum, cnum, *vcs[t], *vcout[t], gamma);
+      else               std::tie(c, e) = leidenChooseCommunity   (x, u, vcom, vtot, ctot, *vcs[t], *vcout[t], M, R);
+      if (c) {
+        bool moved;
+        if constexpr (CPM) moved = leidenChangeCommunityCpmOmpW<REFINE>(vcom, ctot, cnum, x, u, c, vtot, vnum);
+        else               moved = leidenChangeCommunityOmpW<REFINE>(vcom, ctot, x, u, c, vtot);
+        if (moved) x.forEachEdgeKey(u, [&](auto v) { vaff[v] = B(1); });
+      }
       vaff[u] = B();
       el += e;  // l1-norm
     }
@@ -680,14 +813,16 @@ inline int leidenMoveOmpW(vector<K>& vcom, vector<W>& ctot, vector<B>& vaff, vec
  * @param vtot total edge weight of each vertex
  * @param M total weight of "undirected" graph (1/2 of directed graph)
  * @param R resolution (0, 1]
+ * @param gamma CPM resolution / density threshold (CPM only)
  * @param L max iterations
  * @param fc has local moving phase converged?
  * @returns iterations performed (0 if converged already)
+ * @tparam CPM use the CPM objective (node-count null model) instead of modularity
  */
-template <bool REFINE=false, class G, class K, class W, class B, class FC>
-inline int leidenMoveOmpW(vector<K>& vcom, vector<W>& ctot, vector<B>& vaff, vector<vector<K>*>& vcs, vector<vector<W>*>& vcout, const G& x, const vector<K>& vcob, const vector<W>& vtot, double M, double R, int L, FC fc) {
+template <bool REFINE=false, bool CPM=false, class G, class K, class W, class B, class FC>
+inline int leidenMoveOmpW(vector<K>& vcom, vector<W>& ctot, vector<W>& cnum, vector<B>& vaff, vector<vector<K>*>& vcs, vector<vector<W>*>& vcout, const G& x, const vector<K>& vcob, const vector<W>& vtot, const vector<W>& vnum, double M, double R, double gamma, int L, FC fc) {
   auto fa = [](auto u) { return true; };
-  return leidenMoveOmpW<REFINE>(vcom, ctot, vaff, vcs, vcout, x, vcob, vtot, M, R, L, fc, fa);
+  return leidenMoveOmpW<REFINE, CPM>(vcom, ctot, cnum, vaff, vcs, vcout, x, vcob, vtot, vnum, M, R, gamma, L, fc, fa);
 }
 #endif
 #pragma endregion
@@ -1188,13 +1323,14 @@ inline auto leidenInvoke(const G& x, const LeidenOptions& o, FI fi, FM fm, FA fa
  * @param fa is vertex allowed to be updated? (u)
  * @returns leiden result
  */
-template <bool DYNAMIC=false, class G, class FI, class FM, class FA>
+template <bool DYNAMIC=false, bool CPM=false, class G, class FI, class FM, class FA>
 inline auto leidenInvokeOmp(const G& x, const LeidenOptions& o, FI fi, FM fm, FA fa) {
   using  K = typename G::key_type;
   using  W = LEIDEN_WEIGHT_TYPE;
   using  B = char;
   // Options.
   double R = o.resolution;
+  double Gamma = o.gamma;
   int    L = o.maxIterations, l = 0;
   int    P = o.maxPasses, p = 0;
   // Get graph properties.
@@ -1208,6 +1344,11 @@ inline auto leidenInvokeOmp(const G& x, const LeidenOptions& o, FI fi, FM fm, FA
   vector<K> vcob(S);        // Community bound (any pass)
   vector<W> utot, vtot(S);  // Total vertex weights (first pass, current pass)
   vector<W> ctot;           // Total community weights (any pass)
+  // CPM node-count buffers (unused when CPM=false). unum/vnum mirror utot/vtot
+  // (first pass / current pass); cnum mirrors ctot; vnumb is the aggregation
+  // scratch (analogous to z for vtot, recomputed each coarsening step).
+  vector<W> unum, vnum, cnum, vnumb;
+  if constexpr (CPM) { vnum.resize(S); vnumb.resize(S); }
   vector<K> bufk(T);        // Buffer for exclusive scan
   vector<size_t> bufs(T);   // Buffer for exclusive scan
   vector<vector<K>*> vcs(T);    // Hashtable keys
@@ -1215,6 +1356,7 @@ inline auto leidenInvokeOmp(const G& x, const LeidenOptions& o, FI fi, FM fm, FA
   if (!DYNAMIC) ucom.resize(S);
   if (!DYNAMIC) utot.resize(S);
   if (!DYNAMIC) ctot.resize(S);
+  if (!DYNAMIC && CPM) { unum.resize(S); cnum.resize(S); }
   leidenAllocateHashtablesW(vcs, vcout, S);
   size_t Z = max(size_t(o.aggregationTolerance * X), X);
   size_t Y = max(size_t(o.aggregationTolerance * Z), Z);
@@ -1234,6 +1376,11 @@ inline auto leidenInvokeOmp(const G& x, const LeidenOptions& o, FI fi, FM fm, FA
     fillValueOmpU(utot, W());
     fillValueOmpU(vtot, W());
     fillValueOmpU(ctot, W());
+    if constexpr (CPM) {
+      fillValueOmpU(unum, W(1));  // every finest-level vertex is exactly one node
+      fillValueOmpU(vnum, W());
+      fillValueOmpU(cnum, W());
+    }
     cv.respan(S);
     y .respan(S);
     z .respan(S);
@@ -1241,6 +1388,8 @@ inline auto leidenInvokeOmp(const G& x, const LeidenOptions& o, FI fi, FM fm, FA
     mark([&]() {
       // Initialize community membership and total vertex/community weights.
       ti += measureDuration([&]() { fi(ucom, utot, ctot); });
+      // CPM: seed singleton community node counts in lockstep with ctot.
+      if constexpr (CPM) leidenInitializeCnumOmpW(cnum, x, unum);
       // Mark affected vertices.
       tm += measureDuration([&]() { fm(vaff, vcs, vcout, ucom, utot, ctot); });
       // Start timing first pass.
@@ -1253,18 +1402,20 @@ inline auto leidenInvokeOmp(const G& x, const LeidenOptions& o, FI fi, FM fm, FA
         bool isFirst = p==0;
         int m = 0;
         tl += measureDuration([&]() {
-          if (isFirst) m += leidenMoveOmpW(ucom, ctot, vaff, vcs, vcout, x, vcob, utot, M, R, L, fc, fa);
-          else         m += leidenMoveOmpW(vcom, ctot, vaff, vcs, vcout, y, vcob, vtot, M, R, L, fc);
+          if (isFirst) m += leidenMoveOmpW<false, CPM>(ucom, ctot, cnum, vaff, vcs, vcout, x, vcob, utot, unum, M, R, Gamma, L, fc, fa);
+          else         m += leidenMoveOmpW<false, CPM>(vcom, ctot, cnum, vaff, vcs, vcout, y, vcob, vtot, vnum, M, R, Gamma, L, fc);
         });
         tr += measureDuration([&]() {
           if (isFirst) copyValuesOmpW(vcob, ucom);
           else         copyValuesOmpW(vcob, vcom);
           if (isFirst) leidenInitializeOmpW(ucom, ctot, x, utot);
           else         leidenInitializeOmpW(vcom, ctot, y, vtot);
+          // CPM: reset community node counts to singletons, matching ctot.
+          if constexpr (CPM) { if (isFirst) leidenInitializeCnumOmpW(cnum, x, unum); else leidenInitializeCnumOmpW(cnum, y, vnum); }
           if (isFirst) fillValueOmpU(vaff.data(), x.order(), B(1));
           else         fillValueOmpU(vaff.data(), y.order(), B(1));
-          if (isFirst) m += leidenMoveOmpW<true>(ucom, ctot, vaff, vcs, vcout, x, vcob, utot, M, R, L, fc);
-          else         m += leidenMoveOmpW<true>(vcom, ctot, vaff, vcs, vcout, y, vcob, vtot, M, R, L, fc);
+          if (isFirst) m += leidenMoveOmpW<true, CPM>(ucom, ctot, cnum, vaff, vcs, vcout, x, vcob, utot, unum, M, R, Gamma, L, fc);
+          else         m += leidenMoveOmpW<true, CPM>(vcom, ctot, cnum, vaff, vcs, vcout, y, vcob, vtot, vnum, M, R, Gamma, L, fc);
         });
         l += max(m, 1); ++p;
         if (m<=1 || p>=P) break;
@@ -1284,6 +1435,14 @@ inline auto leidenInvokeOmp(const G& x, const LeidenOptions& o, FI fi, FM fm, FA
           if (isFirst) leidenAggregateOmpW(z.offsets, z.degrees, z.edgeKeys, z.edgeValues, bufs, vcs, vcout, x, ucom, cv.offsets, cv.edgeKeys);
           else         leidenAggregateOmpW(z.offsets, z.degrees, z.edgeKeys, z.edgeValues, bufs, vcs, vcout, y, vcom, cv.offsets, cv.edgeKeys);
         });
+        // CPM: roll up node counts for the coarsened graph (reads the pre-swap
+        // graph + membership, writes scratch, then swaps in as the new vnum).
+        if constexpr (CPM) {
+          fillValueOmpU(vnumb.data(), CN, W());
+          if (isFirst) leidenAggregateVertexNumsOmpW(vnumb, x, ucom, unum);
+          else         leidenAggregateVertexNumsOmpW(vnumb, y, vcom, vnum);
+          swap(vnum, vnumb);
+        }
         swap(y, z);
         // fillValueOmpU(vcob.data(), CN, K());
         // fillValueOmpU(vcom.data(), CN, K());
@@ -1292,6 +1451,9 @@ inline auto leidenInvokeOmp(const G& x, const LeidenOptions& o, FI fi, FM fm, FA
         fillValueOmpU(vaff.data(), CN, B(1));
         leidenVertexWeightsOmpW(vtot, y);
         leidenInitializeOmpW(vcom, ctot, y, vtot);
+        // CPM: seed singleton community node counts for the new graph (vnum now
+        // holds the coarsened per-vertex counts from the rollup above).
+        if constexpr (CPM) leidenInitializeCnumOmpW(cnum, y, vnum);
         E /= o.toleranceDrop;
       }
       if (p<=1) {}
@@ -1364,8 +1526,9 @@ inline auto leidenStatic(const G& x, const LeidenOptions& o={}) {
  * @param x original graph
  * @param o leiden options
  * @returns leiden result
+ * @tparam CPM use the CPM objective (resolution-limit-free) instead of modularity
  */
-template <class G>
+template <bool CPM=false, class G>
 inline auto leidenStaticOmp(const G& x, const LeidenOptions& o={}) {
   using B = char;
   auto fi = [&](auto& vcom, auto& vtot, auto& ctot)  {
@@ -1376,7 +1539,7 @@ inline auto leidenStaticOmp(const G& x, const LeidenOptions& o={}) {
     fillValueOmpU(vaff, B(1));
   };
   auto fa = [ ](auto u) { return true; };
-  return leidenInvokeOmp<false>(x, o, fi, fm, fa);
+  return leidenInvokeOmp<false, CPM>(x, o, fi, fm, fa);
 }
 #endif
 #pragma endregion

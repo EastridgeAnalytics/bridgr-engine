@@ -1,4 +1,5 @@
 #include "binder/binder.h"
+#include "common/exception/binder.h"
 #include "common/exception/runtime.h"
 #include "common/in_mem_gds_utils.h"
 #include "common/in_mem_graph.h"
@@ -8,11 +9,14 @@
 #include "function/algo_function.h"
 #include "function/config/louvain_config.h"
 #include "function/config/max_iterations_config.h"
+#include "function/config/spanning_forest_config.h"
 #include "function/gds/gds_utils.h"
 #include "function/gds/gds_vertex_compute.h"
+#include "function/gds/weight_utils.h"
 #include "function/table/bind_input.h"
 #include "processor/execution_context.h"
 #include "transaction/transaction.h"
+#include <format>
 
 using namespace std;
 using namespace lbug::binder;
@@ -42,21 +46,24 @@ constexpr offset_t UNASSIGNED_COMM = numeric_limits<offset_t>::max();
 
 struct LouvainOptionalParams final : public MaxIterationOptionalParams {
     OptionalParam<MaxPhases> maxPhases;
+    OptionalParam<WeightProperty> weightProperty;
 
     explicit LouvainOptionalParams(const expression_vector& optionalParams);
 
     // For copy only
     LouvainOptionalParams(OptionalParam<MaxIterations> maxIterations,
-        OptionalParam<MaxPhases> maxPhases)
-        : MaxIterationOptionalParams{maxIterations}, maxPhases{std::move(maxPhases)} {}
+        OptionalParam<MaxPhases> maxPhases, OptionalParam<WeightProperty> weightProperty)
+        : MaxIterationOptionalParams{maxIterations}, maxPhases{std::move(maxPhases)},
+          weightProperty{std::move(weightProperty)} {}
 
     void evaluateParams(main::ClientContext* context) override {
         MaxIterationOptionalParams::evaluateParams(context);
         maxPhases.evaluateParam(context);
+        weightProperty.evaluateParam(context);
     }
 
     std::unique_ptr<function::OptionalParams> copy() override {
-        return std::make_unique<LouvainOptionalParams>(maxIterations, maxPhases);
+        return std::make_unique<LouvainOptionalParams>(maxIterations, maxPhases, weightProperty);
     }
 };
 
@@ -66,6 +73,8 @@ LouvainOptionalParams::LouvainOptionalParams(const expression_vector& optionalPa
         auto paramName = StringUtils::getLower(optionalParam->getAlias());
         if (paramName == MaxPhases::NAME) {
             maxPhases = function::OptionalParam<MaxPhases>(optionalParam);
+        } else if (paramName == WeightProperty::NAME) {
+            weightProperty = function::OptionalParam<WeightProperty>(optionalParam);
         } else if (paramName == MaxIterations::NAME) {
             continue;
         } else {
@@ -491,34 +500,75 @@ private:
     unique_ptr<ValueVector> componentIDVector;
 };
 
+// Builds the initial in-memory graph for the first Louvain phase.
+//
+// When `weightProperty` is empty the graph is unweighted: every inserted edge gets
+// `DEFAULT_WEIGHT` (1.0) and behavior is identical to the historical implementation. When a
+// weight property is supplied, the named edge property is requested in the scan and read as a
+// `double` per edge. Weights are validated to be non-negative (modularity is ill-defined for
+// negative weights); a negative weight raises a clear runtime error.
 void initInMemoryGraph(const table_id_t tableId, const offset_t numNodes, Graph* graph,
-    PhaseState& state) {
+    PhaseState& state, const std::string& weightProperty) {
     const auto nbrTables = graph->getRelInfos(tableId);
     const auto nbrInfo = nbrTables[0];
     DASSERT(nbrInfo.srcTableID == nbrInfo.dstTableID);
+
+    const bool useWeights = !weightProperty.empty();
+    // Validate and resolve the weight property, mirroring the spanning forest pattern.
+    if (useWeights && !nbrInfo.relGroupEntry->containsProperty(weightProperty)) {
+        throw RuntimeException{std::format("Cannot find property: {}", weightProperty)};
+    }
+    const auto propertyType =
+        (useWeights ?
+                nbrInfo.relGroupEntry->getProperty(weightProperty).getType().getLogicalTypeID() :
+                LogicalTypeID::DOUBLE);
+    if (useWeights && !LogicalTypeUtils::isNumerical(propertyType)) {
+        throw RuntimeException{
+            std::format("Provided weight property is not numerical: {}", weightProperty)};
+    }
+
+    // The weight column is requested in the scan only when a weight property is given. When present
+    // it is the first (and only) entry in the property vectors passed to `forEach`.
+    std::vector<std::string> relProps;
+    if (useWeights) {
+        relProps.push_back(weightProperty);
+    }
     // Set randomLookup to false to enable caching during graph materialization.
     const auto scanState = graph->prepareRelScan(*nbrInfo.relGroupEntry, nbrInfo.relTableID,
-        nbrInfo.dstTableID, {}, false /*randomLookup*/);
+        nbrInfo.dstTableID, relProps, false /*randomLookup*/);
 
-    for (auto nodeId = 0u; nodeId < numNodes; ++nodeId) {
-        state.initNextNode(nodeId);
-        const nodeID_t nextNodeId = {nodeId, tableId};
-        for (auto chunk : graph->scanFwd(nextNodeId, *scanState)) {
-            chunk.forEach([&](auto neighbors, auto, auto i) {
-                auto nbrId = neighbors[i].offset;
-                state.insertNbr(nodeId, nbrId);
-            });
+    WeightUtils::visit(LouvainFunction::name, propertyType, [&]<typename T>(T) {
+        for (auto nodeId = 0u; nodeId < numNodes; ++nodeId) {
+            state.initNextNode(nodeId);
+            const nodeID_t nextNodeId = {nodeId, tableId};
+            for (auto chunk : graph->scanFwd(nextNodeId, *scanState)) {
+                chunk.forEach([&](auto neighbors, auto propertyVectors, auto i) {
+                    auto nbrId = neighbors[i].offset;
+                    weight_t weight = DEFAULT_WEIGHT;
+                    if (useWeights) {
+                        weight = static_cast<weight_t>(propertyVectors[0]->template getValue<T>(i));
+                        WeightUtils::checkWeight(LouvainFunction::name, weight);
+                    }
+                    state.insertNbr(nodeId, nbrId, weight);
+                });
+            }
+            for (auto chunk : graph->scanBwd(nextNodeId, *scanState)) {
+                chunk.forEach([&](auto neighbors, auto propertyVectors, auto i) {
+                    auto nbrId = neighbors[i].offset;
+                    if (nbrId != nodeId) {
+                        weight_t weight = DEFAULT_WEIGHT;
+                        if (useWeights) {
+                            weight =
+                                static_cast<weight_t>(propertyVectors[0]->template getValue<T>(i));
+                            WeightUtils::checkWeight(LouvainFunction::name, weight);
+                        }
+                        state.insertNbr(nodeId, nbrId, weight);
+                    }
+                });
+            }
         }
-        for (auto chunk : graph->scanBwd(nextNodeId, *scanState)) {
-            chunk.forEach([&](auto neighbors, auto, auto i) {
-                auto nbrId = neighbors[i].offset;
-                if (nbrId != nodeId) {
-                    state.insertNbr(nodeId, nbrId);
-                }
-            });
-        }
-    }
-    state.finalize();
+        state.finalize();
+    });
 }
 
 // Sequentially renumber the communities, each of which becomes a new node in the next phase.
@@ -591,8 +641,9 @@ static common::offset_t tableFunc(const TableFuncInput& input, TableFuncOutput&)
     FinalResults finalResults(origNumNodes);
     PhaseState state(origNumNodes, mm, input.context);
 
-    // Create the initial in-memory graph.
-    initInMemoryGraph(tableID, origNumNodes, graph, state);
+    // Create the initial in-memory graph. The optional weight property flows into edge weights;
+    // when empty, the graph is unweighted (all edges weight 1.0).
+    initInMemoryGraph(tableID, origNumNodes, graph, state, config.weightProperty.getParamVal());
 
     // Each phases attempts to decrease the number of communities by merging nodes into supernodes.
     for (auto phase = 0u; phase < config.maxPhases.getParamVal(); ++phase) {

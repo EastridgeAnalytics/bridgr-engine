@@ -1,0 +1,233 @@
+[
+  {
+    "variant": "full(default)",
+    "n": 511,
+    "true": 220,
+    "eng": {
+      "f1": 0.695,
+      "p": 0.533,
+      "r": 1.0,
+      "oce": 5610,
+      "n_comm": 91,
+      "max_size": 67,
+      "giant": true
+    },
+    "ig": {
+      "f1": 0.79,
+      "p": 0.653,
+      "r": 1.0,
+      "oce": 1100,
+      "n_comm": 156,
+      "max_size": 33,
+      "giant": false
+    },
+    "cpm": {
+      "f1": 0.948,
+      "p": 0.902,
+      "r": 1.0,
+      "oce": 153,
+      "n_comm": 191,
+      "max_size": 7,
+      "giant": false
+    },
+    "gap": 0.095
+  },
+  {
+    "variant": "no_hubs",
+    "n": 511,
+    "true": 220,
+    "eng": {
+      "f1": 0.737,
+      "p": 0.583,
+      "r": 1.0,
+      "oce": 5798,
+      "n_comm": 101,
+      "max_size": 73,
+      "giant": true
+    },
+    "ig": {
+      "f1": 0.853,
+      "p": 0.743,
+      "r": 1.0,
+      "oce": 460,
+      "n_comm": 175,
+      "max_size": 16,
+      "giant": false
+    },
+    "cpm": {
+      "f1": 0.959,
+      "p": 0.921,
+      "r": 1.0,
+      "oce": 111,
+      "n_comm": 198,
+      "max_size": 6,
+      "giant": false
+    },
+    "gap": 0.116
+  },
+  {
+    "variant": "no_bridges",
+    "n": 511,
+    "true": 220,
+    "eng": {
+      "f1": 0.757,
+      "p": 0.609,
+      "r": 1.0,
+      "oce": 6878,
+      "n_comm": 105,
+      "max_size": 78,
+      "giant": true
+    },
+    "ig": {
+      "f1": 0.881,
+      "p": 0.787,
+      "r": 1.0,
+      "oce": 684,
+      "n_comm": 185,
+      "max_size": 24,
+      "giant": false
+    },
+    "cpm": {
+      "f1": 0.988,
+      "p": 0.976,
+      "r": 1.0,
+      "oce": 62,
+      "n_comm": 212,
+      "max_size": 8,
+      "giant": false
+    },
+    "gap": 0.124
+  },
+  {
+    "variant": "no_hubs_no_bridges",
+    "n": 511,
+    "true": 220,
+    "eng": {
+      "f1": 0.841,
+      "p": 0.726,
+      "r": 1.0,
+      "oce": 7440,
+      "n_comm": 124,
+      "max_size": 86,
+      "giant": true
+    },
+    "ig": {
+      "f1": 0.949,
+      "p": 0.902,
+      "r": 1.0,
+      "oce": 100,
+      "n_comm": 210,
+      "max_size": 10,
+      "giant": false
+    },
+    "cpm": {
+      "f1": 1.0,
+      "p": 1.0,
+      "r": 1.0,
+      "oce": 0,
+      "n_comm": 220,
+      "max_size": 5,
+      "giant": false
+    },
+    "gap": 0.108
+  },
+  {
+    "variant": "hubs_only(no_bridge)",
+    "n": 511,
+    "true": 220,
+    "eng": {
+      "f1": 0.757,
+      "p": 0.609,
+      "r": 1.0,
+      "oce": 6878,
+      "n_comm": 105,
+      "max_size": 78,
+      "giant": true
+    },
+    "ig": {
+      "f1": 0.881,
+      "p": 0.788,
+      "r": 1.0,
+      "oce": 718,
+      "n_comm": 185,
+      "max_size": 29,
+      "giant": false
+    },
+    "cpm": {
+      "f1": 0.988,
+      "p": 0.976,
+      "r": 1.0,
+      "oce": 62,
+      "n_comm": 212,
+      "max_size": 8,
+      "giant": false
+    },
+    "gap": 0.124
+  },
+  {
+    "variant": "bigger(400 ent)",
+    "n": 959,
+    "true": 420,
+    "eng": {
+      "f1": 0.764,
+      "p": 0.619,
+      "r": 1.0,
+      "oce": 21039,
+      "n_comm": 202,
+      "max_size": 140,
+      "giant": true
+    },
+    "ig": {
+      "f1": 0.863,
+      "p": 0.759,
+      "r": 1.0,
+      "oce": 1685,
+      "n_comm": 340,
+      "max_size": 37,
+      "giant": false
+    },
+    "cpm": {
+      "f1": 0.972,
+      "p": 0.945,
+      "r": 1.0,
+      "oce": 146,
+      "n_comm": 389,
+      "max_size": 7,
+      "giant": false
+    },
+    "gap": 0.099
+  },
+  {
+    "variant": "many_bridges(120)",
+    "n": 511,
+    "true": 220,
+    "eng": {
+      "f1": 0.467,
+      "p": 0.304,
+      "r": 1.0,
+      "oce": 4921,
+      "n_comm": 54,
+      "max_size": 51,
+      "giant": false
+    },
+    "ig": {
+      "f1": 0.596,
+      "p": 0.424,
+      "r": 1.0,
+      "oce": 2065,
+      "n_comm": 107,
+      "max_size": 32,
+      "giant": false
+    },
+    "cpm": {
+      "f1": 0.907,
+      "p": 0.83,
+      "r": 1.0,
+      "oce": 237,
+      "n_comm": 170,
+      "max_size": 7,
+      "giant": false
+    },
+    "gap": 0.129
+  }
+]

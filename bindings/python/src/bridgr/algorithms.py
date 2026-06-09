@@ -145,6 +145,9 @@ class GraphAlgorithms:
         *,
         resolution: float = 1.0,
         max_iterations: int = 10,
+        weight_property: str | None = None,
+        objective: str = "modularity",
+        gamma: float = 1.0,
     ) -> list[dict[str, Any]]:
         """Detect communities using the Leiden algorithm.
 
@@ -154,14 +157,49 @@ class GraphAlgorithms:
         alongside ``louvain()``. The proprietary ``bridgr_platform`` package adds
         an ER/Scan-integrated wrapper over this same call.
 
+        Args:
+            resolution: Modularity resolution; higher -> more, smaller
+                communities. Used only by the (default) ``"modularity"`` objective.
+            max_iterations: Max local-moving iterations per phase (wired to the
+                engine's ``maxIterations``; previously accepted but dropped).
+            weight_property: Numeric edge property to use as the edge weight
+                (e.g. a Splink ``match_probability``). ``None`` (default) leaves
+                every edge weight 1 (the historical unweighted behavior). Weights
+                must be non-negative; the engine rejects negatives.
+            objective: ``"modularity"`` (default) or ``"cpm"``. CPM (Constant
+                Potts Model) is resolution-limit-free, so it does not over-merge
+                weakly-connected communities the way modularity can on fragmented
+                entity-resolution graphs; it uses ``gamma`` instead of
+                ``resolution``.
+            gamma: CPM density threshold (>0); only used when
+                ``objective="cpm"``. Larger gamma yields smaller, denser
+                communities. On Splink-style ER graphs gamma in roughly 0.25-0.5
+                removes the modularity over-merge.
+
         Returns list of {node_id, community_id}.
         """
+        objective = objective.lower()
+        if objective not in ("modularity", "cpm"):
+            raise ValueError(
+                f"objective={objective!r} is invalid; expected 'modularity' or 'cpm'."
+            )
         self._ensure_algo()
         graph_name = f"_leid_{node_label}_{edge_label}"
+        args = [
+            f"resolution := {float(resolution)}",
+            f"maxIterations := {int(max_iterations)}",
+        ]
+        if objective == "cpm":
+            args.append("objective := 'cpm'")
+            args.append(f"gamma := {float(gamma)}")
+        if weight_property:
+            wp = weight_property.replace("'", "''")
+            args.append(f"weight_property := '{wp}'")
+        arg_str = ", ".join(args)
         self._project_graph(graph_name, node_label, edge_label)
         try:
             return self._db.query(
-                f"CALL LEIDEN('{graph_name}', resolution := {resolution}) "
+                f"CALL LEIDEN('{graph_name}', {arg_str}) "
                 f"RETURN node.{self._primary_key(node_label)} AS node_id, community_id "
                 f"ORDER BY community_id, node_id"
             )

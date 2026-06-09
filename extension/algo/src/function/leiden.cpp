@@ -5,18 +5,22 @@
 #include "binder/binder.h"
 #include "common/exception/runtime.h"
 #include "common/string_utils.h"
+#include "common/type_utils.h"
 #include "common/types/types.h"
 #include "function/algo_function.h"
 #include "function/config/leiden_config.h"
 #include "function/config/louvain_config.h"
 #include "function/config/max_iterations_config.h"
+#include "function/config/spanning_forest_config.h"
 #include "function/gds/gds_utils.h"
 #include "function/gds/gds_vertex_compute.h"
+#include "function/gds/weight_utils.h"
 #include "function/gve_leiden.h"
 #include "function/table/bind_input.h"
 #include "main/client_context.h"
 #include "processor/execution_context.h"
 #include "transaction/transaction.h"
+#include <format>
 
 using namespace std;
 using namespace lbug::binder;
@@ -40,6 +44,20 @@ using namespace lbug::function;
 // schema (node internal id + INT64 `community_id`); only the algorithm body
 // changed: it enumerates the projected graph, builds an undirected edge list,
 // runs GVE-Leiden, and writes the per-node community id back.
+//
+// Optional `weight_property := 'col'` makes Leiden weighted: the named numeric
+// edge property is read as each edge's weight (GVE-Leiden's modularity is
+// weighted). Absent (the default) every edge has weight 1.0 — the historical
+// unweighted behavior. Weights must be non-negative (modularity is ill-defined
+// for negatives); a negative weight raises a clear runtime error. Weight reading
+// mirrors the `WeightProperty`/`WeightUtils` pattern in `spanning_forest.cpp`.
+//
+// Optional `objective := 'cpm'` switches the objective from modularity (default)
+// to the Constant Potts Model, which is resolution-limit-free and therefore does
+// not over-merge weakly-connected communities the way modularity can on
+// fragmented graphs. CPM uses `gamma := <density threshold>` (default 1.0)
+// instead of `resolution`. Both pass through the GVE bridge to a compile-time
+// objective switch (see `gve/leiden.hxx`); the modularity path is unchanged.
 
 namespace lbug {
 namespace algo_extension {
@@ -48,22 +66,32 @@ namespace {
 struct LeidenOptionalParams final : public MaxIterationOptionalParams {
     OptionalParam<MaxPhases> maxPhases;
     OptionalParam<Resolution> resolution;
+    OptionalParam<WeightProperty> weightProperty;
+    OptionalParam<Objective> objective;
+    OptionalParam<Gamma> gamma;
 
     explicit LeidenOptionalParams(const expression_vector& optionalParams);
 
     LeidenOptionalParams(OptionalParam<MaxIterations> maxIterations,
-        OptionalParam<MaxPhases> maxPhases, OptionalParam<Resolution> resolution)
+        OptionalParam<MaxPhases> maxPhases, OptionalParam<Resolution> resolution,
+        OptionalParam<WeightProperty> weightProperty, OptionalParam<Objective> objective,
+        OptionalParam<Gamma> gamma)
         : MaxIterationOptionalParams{maxIterations}, maxPhases{std::move(maxPhases)},
-          resolution{std::move(resolution)} {}
+          resolution{std::move(resolution)}, weightProperty{std::move(weightProperty)},
+          objective{std::move(objective)}, gamma{std::move(gamma)} {}
 
     void evaluateParams(main::ClientContext* context) override {
         MaxIterationOptionalParams::evaluateParams(context);
         maxPhases.evaluateParam(context);
         resolution.evaluateParam(context);
+        weightProperty.evaluateParam(context);
+        objective.evaluateParam(context);
+        gamma.evaluateParam(context);
     }
 
     std::unique_ptr<function::OptionalParams> copy() override {
-        return std::make_unique<LeidenOptionalParams>(maxIterations, maxPhases, resolution);
+        return std::make_unique<LeidenOptionalParams>(maxIterations, maxPhases, resolution,
+            weightProperty, objective, gamma);
     }
 };
 
@@ -75,6 +103,12 @@ LeidenOptionalParams::LeidenOptionalParams(const expression_vector& optionalPara
             maxPhases = function::OptionalParam<MaxPhases>(optionalParam);
         } else if (paramName == Resolution::NAME) {
             resolution = function::OptionalParam<Resolution>(optionalParam);
+        } else if (paramName == WeightProperty::NAME) {
+            weightProperty = function::OptionalParam<WeightProperty>(optionalParam);
+        } else if (paramName == Objective::NAME) {
+            objective = function::OptionalParam<Objective>(optionalParam);
+        } else if (paramName == Gamma::NAME) {
+            gamma = function::OptionalParam<Gamma>(optionalParam);
         } else if (paramName == MaxIterations::NAME) {
             continue;
         } else {
@@ -139,42 +173,56 @@ private:
 // Enumerate the projected graph's undirected edges exactly once each.
 //
 // The engine may store a relationship in a single direction, so a node's full
-// neighborhood requires scanning both forward and backward (the same traversal
-// the previous implementation used to build its undirected CSR). We canonicalize
-// each pair as (min, max) and dedupe, so every undirected edge is emitted once
+// neighborhood requires scanning both forward and backward. We canonicalize each
+// pair as (min, max) and dedupe, so every undirected edge is emitted once
 // regardless of which storage direction it lives in. GVE-Leiden symmetrizes the
 // resulting edge list internally.
+//
+// `T` is the weight property's element type (from WeightUtils::visit). When
+// `useWeights` is true the weight column is the only requested rel property, so it
+// is `propertyVectors[0]`; the value is read as double, checked non-negative, and
+// narrowed to GVE's float. When false, `relProps` is empty and every edge gets
+// weight 1.0 (the property vector is never touched).
+template<typename T>
 std::vector<GveEdge> collectUndirectedEdges(const table_id_t tableId, const offset_t numNodes,
-    Graph* graph) {
-    const auto nbrTables = graph->getRelInfos(tableId);
-    const auto nbrInfo = nbrTables[0];
-    DASSERT(nbrInfo.srcTableID == nbrInfo.dstTableID);
-    const auto scanState = graph->prepareRelScan(*nbrInfo.relGroupEntry, nbrInfo.relTableID,
-        nbrInfo.dstTableID, {}, false /*randomLookup*/);
-
+    Graph* graph, NbrScanState* scanState, bool useWeights) {
     std::vector<GveEdge> edges;
     // Dedupe canonical undirected pairs. Node offsets fit in 32 bits here (the
     // bridge enforces numNodes <= UINT32_MAX), so pack (min<<32 | max) as the key.
     std::unordered_set<uint64_t> seen;
 
-    const auto addPair = [&](offset_t a, offset_t b) {
+    const auto addPair = [&](offset_t a, offset_t b, float weight) {
         const offset_t lo = a < b ? a : b;
         const offset_t hi = a < b ? b : a;
         const uint64_t key = (static_cast<uint64_t>(lo) << 32) | static_cast<uint64_t>(hi);
         if (seen.insert(key).second) {
-            edges.push_back(GveEdge{static_cast<uint64_t>(a), static_cast<uint64_t>(b), 1.0f});
+            edges.push_back(GveEdge{static_cast<uint64_t>(a), static_cast<uint64_t>(b), weight});
         }
     };
 
     for (auto nodeId = 0u; nodeId < numNodes; ++nodeId) {
         const nodeID_t srcNodeId = {nodeId, tableId};
         for (auto chunk : graph->scanFwd(srcNodeId, *scanState)) {
-            chunk.forEach(
-                [&](auto neighbors, auto, auto i) { addPair(nodeId, neighbors[i].offset); });
+            chunk.forEach([&](auto neighbors, auto propertyVectors, auto i) {
+                float weight = 1.0f;
+                if (useWeights) {
+                    const double w = static_cast<double>(propertyVectors[0]->template getValue<T>(i));
+                    WeightUtils::checkWeight(LeidenFunction::name, w);
+                    weight = static_cast<float>(w);
+                }
+                addPair(nodeId, neighbors[i].offset, weight);
+            });
         }
         for (auto chunk : graph->scanBwd(srcNodeId, *scanState)) {
-            chunk.forEach(
-                [&](auto neighbors, auto, auto i) { addPair(nodeId, neighbors[i].offset); });
+            chunk.forEach([&](auto neighbors, auto propertyVectors, auto i) {
+                float weight = 1.0f;
+                if (useWeights) {
+                    const double w = static_cast<double>(propertyVectors[0]->template getValue<T>(i));
+                    WeightUtils::checkWeight(LeidenFunction::name, w);
+                    weight = static_cast<float>(w);
+                }
+                addPair(nodeId, neighbors[i].offset, weight);
+            });
         }
     }
     return edges;
@@ -193,6 +241,9 @@ static common::offset_t tableFunc(const TableFuncInput& input, TableFuncOutput&)
     auto leidenBindData = input.bindData->constPtrCast<LeidenBindData>();
     auto& config = leidenBindData->optionalParams->constCast<LeidenOptionalParams>();
     const double resolution = config.resolution.getParamVal();
+    const std::string weightProp = config.weightProperty.getParamVal();
+    const bool useCpm = (config.objective.getParamVal() == Objective::CPM);
+    const double gamma = config.gamma.getParamVal();
 
     // GVE keys are uint32_t; surface a clear error before traversing if too large.
     if (numNodes > static_cast<offset_t>(UINT32_MAX)) {
@@ -200,16 +251,42 @@ static common::offset_t tableFunc(const TableFuncInput& input, TableFuncOutput&)
                                "GVE-Leiden backend does not support.");
     }
 
+    // Resolve + validate the optional weight property (mirrors spanning_forest.cpp).
+    const auto nbrInfo = graph->getRelInfos(tableID)[0];
+    DASSERT(nbrInfo.srcTableID == nbrInfo.dstTableID);
+    const bool useWeights = !weightProp.empty();
+    if (useWeights && !nbrInfo.relGroupEntry->containsProperty(weightProp)) {
+        throw RuntimeException{std::format("Cannot find property: {}", weightProp)};
+    }
+    const auto propertyType =
+        (useWeights ? nbrInfo.relGroupEntry->getProperty(weightProp).getType().getLogicalTypeID() :
+                      LogicalTypeID::DOUBLE);
+    if (useWeights && !LogicalTypeUtils::isNumerical(propertyType)) {
+        throw RuntimeException{
+            std::format("Provided weight property is not numerical: {}", weightProp)};
+    }
+    std::vector<std::string> relProps;
+    if (useWeights) {
+        relProps.push_back(weightProp);
+    }
+    const auto scanState = graph->prepareRelScan(*nbrInfo.relGroupEntry, nbrInfo.relTableID,
+        nbrInfo.dstTableID, relProps, false /*randomLookup*/);
+
     FinalResults finalResults(numNodes);
 
-    // Build the undirected edge list and run GVE-Leiden. Isolated nodes are not
-    // in the edge list but are covered because runGveLeiden receives numNodes and
-    // returns a community id for every offset (singletons for isolated nodes).
-    const auto edges = collectUndirectedEdges(tableID, numNodes, graph);
+    // Build the undirected (optionally weighted) edge list and run GVE-Leiden.
+    // Isolated nodes are not in the edge list but are covered because runGveLeiden
+    // receives numNodes and returns a community id for every offset (singletons
+    // for isolated nodes).
+    std::vector<GveEdge> edges;
+    WeightUtils::visit(LeidenFunction::name, propertyType, [&]<typename T>(T) {
+        edges = collectUndirectedEdges<T>(tableID, numNodes, graph, scanState.get(), useWeights);
+    });
     // Cap GVE's OpenMP threads to the engine's configured parallelism so it does
     // not oversubscribe alongside the engine's task scheduler.
     const int maxThreads = static_cast<int>(clientContext->getMaxNumThreadForExec());
-    finalResults.communities = runGveLeiden(numNodes, edges, resolution, maxThreads);
+    finalResults.communities =
+        runGveLeiden(numNodes, edges, resolution, maxThreads, useCpm, gamma);
 
     const auto parallelCompute = make_unique<WriteResultsVC>(mm, sharedState, finalResults);
     GDSUtils::runVertexCompute(input.context, GDSDensityState::DENSE, graph, *parallelCompute);

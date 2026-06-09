@@ -1,0 +1,4 @@
+# Generated verification data (parquet/csv/membership/cypher) and ad-hoc binaries.
+_data/
+*.csv
+membership_*.csv

@@ -25,6 +25,10 @@ struct MaxPhases {
 struct LouvainConfig final : public GDSConfig {
     uint64_t maxIterations = 20;
     uint64_t maxPhases = MaxPhases::DEFAULT_VALUE;
+    // Optional named edge property to use as the edge weight. Empty means unweighted
+    // (every edge has weight 1.0). The `WeightProperty` config struct is shared with
+    // spanning forest (see `spanning_forest_config.h`).
+    std::string weightProperty;
 
     LouvainConfig() = default;
 };
